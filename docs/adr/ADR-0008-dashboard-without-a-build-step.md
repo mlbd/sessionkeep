@@ -1,6 +1,6 @@
 # ADR-0008 — First dashboard: plain pages embedded in the binary, API as a thin layer over commands
 
-- Date / owner / status: 2026-11-20 / project owner / **proposed** (built this way in slice 1B-2; reversible; owner to confirm)
+- Date / owner / status: 2026-11-20 / project owner / **amended 2026-11-20** (the owner rejected the plain look; the pages were redesigned without a build step, see D73 and `evidence/phase-2/P2-A.md`; owner to confirm the result)
 - Requirement IDs and affected phase: R08, R19, R22; D07 (frontend "candidates"); Phase 1B (1B-2), Phase 6
 - Decision and constraints:
   1. The Phase 1 dashboard is three static files — `index.html`, `app.css`, `app.js` — embedded with `go:embed`. No React, Vite, Tailwind, npm or build step. The owner had approved downloading those packages; this decision does not use that approval.

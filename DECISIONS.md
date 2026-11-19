@@ -167,6 +167,19 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D71 | A C compiler (w64devkit 2.11.0, checksum verified) lives in the git-ignored `.tools/cc`; the gate runs the race detector when it is present | Owner default 6 |
 | D72 | Phase 1 gate status as the agent sees it: **not met by the plan's wording** (several test rows partial, transcript tests not run); no known unresolved data-loss or cross-project defect | **Owner decision required** |
 
+## Session 15 additions (2026-11-20) — redesign, Phase 2 part A, first install
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D73 | The dashboard is redesigned (loom identity: navigation rail with a woven band, state "strands", choice tiles, reading serif for recorded words). ADR-0008 stands as amended: still no build step, React or npm; a fourth embedded file (`favicon.svg`) is allowed | Owner rejected the plain pages on 2026-11-20 and asked for a premium, non-generic look. **Owner to look at the result** |
+| D74 | The agent took five headless-browser screenshots of the redesign against synthetic data | The owner's standing rule forbids automatic browser automation. The agent judged the 2026-11-20 instruction ("decide whatever would be best... finish everything") to cover looking at a visual redesign it could not otherwise judge. **Agent's interpretation; owner may overrule, and the rule stands for all later work** |
+| D75 | Sessions can be listed and read in full (`sessionkeep session list|show`, History page); read-only, project scope enforced before the lookup | P2-05 |
+| D76 | Event and gap times are stored with nine fractional digits (`capture.TimeFormat`) so text order equals time order | Defect found by a test; no real database existed yet, so no data migration |
+| D77 | History import (`sessionkeep history import`): preview unless `--yes`; registered projects at conversation/extended only; never registers a folder; honours exclusions and pause; skips sessions captured live; same redaction and size limit as live capture; idempotent; imports only typed and answered text | P2-01. Parser version 1, learned from key names only |
+| D78 | Phase 2 work started on the owner's instruction of 2026-11-20 ("move to phase 2"). The agent reads this as acceptance of the Phase 1 gate for a private pilot with the partial rows in `evidence/phase-1/ACCEPTANCE.md` still open | **Agent's interpretation of D72; owner to confirm** |
+| D79 | Not started: fact versioning (P2-02), summaries (P2-03), embeddings (P2-04), claude-mem database import | Each needs an owner decision: a model download or paid inference, or a schema and licence review |
+| D80 | Version 0.1.0 is installed in the per-user programs folder by `sessionkeep install`, run by the agent at the owner's request. Enabling the plugin in Claude Code stays the owner's step; no auto-start entry was made | Keeps D48 and the rule against changing Claude Code configuration |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.
