@@ -72,6 +72,8 @@ Usage:
                                    Generate the Claude Code plugin directory for this binary;
                                    --with-mcp also registers the optional MCP server
                                    (changes no Claude Code setting)
+  sessionkeep dashboard                Serve the local web pages (this computer only) and print a
+                                   one-time sign-in link; runs until you press Ctrl+C
   sessionkeep mcp                      Optional MCP server on stdin/stdout with read-only tools
                                    (started by Claude Code, not by hand)
   sessionkeep ingest                   Move captured events from the spool into the database
@@ -306,6 +308,11 @@ func dispatch(inv invocation) error {
 		return remember(inv, rest)
 	case "instruction":
 		return instructionCmd(inv, rest)
+	case "dashboard":
+		if len(rest) != 0 || len(inv.flags) != 0 {
+			return usageErr("usage: sessionkeep dashboard")
+		}
+		return dashboard(inv)
 	case "mcp":
 		if len(rest) != 0 {
 			return usageErr("usage: sessionkeep mcp [--all-projects]")

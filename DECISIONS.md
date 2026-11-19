@@ -134,6 +134,13 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D58 | Full-text index rebuilt with word stemming (migration 0004); when no record has all the words, a labelled partial-match fallback is returned | Forced by a live session in which a correctly stored fact was not found (`evidence/phase-1/1B-1.md`) |
 | D59 | Plan tools `instructions_get` and `checkpoint_get` are merged into `resume_pack` | Internal simplification |
 
+## Session 11 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D60 | [ADR-0008](docs/adr/ADR-0008-dashboard-without-a-build-step.md): the Phase 1 dashboard is three plain embedded files with no npm packages or build step; the API only relays `sessionkeep` commands; loopback bind, one-time sign-in link, Host/Origin checks, request token | **Proposed, built, awaiting owner.** Departs from the React/Vite/Tailwind candidates the owner had approved downloading; chosen as the safer option under D54 because the UI could not be browser-verified in this run |
+| D61 | `sessionkeep dashboard` never opens a browser by itself | Internal; follows the owner's no-browser-automation rule |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

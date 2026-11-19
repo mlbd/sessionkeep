@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>SessionKeep</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <p class="brand">SessionKeep</p>
+  <nav aria-label="Sections">
+    <ul id="nav">
+      <li><a href="#/overview" data-view="overview">Overview</a></li>
+      <li><a href="#/projects" data-view="projects">Projects</a></li>
+      <li><a href="#/search" data-view="search">Search</a></li>
+      <li><a href="#/instructions" data-view="instructions">Instructions</a></li>
+      <li><a href="#/resume" data-view="resume">Resume</a></li>
+      <li><a href="#/diagnostics" data-view="diagnostics">Diagnostics</a></li>
+    </ul>
+  </nav>
+</header>
+<main id="main" tabindex="-1">
+  <h1 id="title">SessionKeep</h1>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <div id="view"></div>
+</main>
+<footer><p id="foot">Local only. This page talks to a server on your own computer and loads nothing from the internet.</p></footer>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
