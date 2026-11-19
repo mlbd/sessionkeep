@@ -70,6 +70,8 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D29 | [ADR-0007](docs/adr/ADR-0007-unregistered-folder-modes.md): unregistered folders are handled by one setting — `manual`, `ask` (shipped default) or `auto` (owner-enabled, explicit level, exclusion list). `project add` has no default capture level | **Accepted by owner 2026-11-19.** Narrows "never auto-enable global capture" to "never by SessionKeep itself" |
 | D30 | Onboarding is CLI-only in Phase 1A (`sessionkeep setup`); the web onboarding screen is part of Phase 1B and writes the same settings | Recorded; follows ADR-0006 |
 | D31 | Hook-payload field allowlist moves from slice 1A-3 to 1A-4, where payloads are first parsed | Internal sequencing change, recorded |
+| D32 | Hook deadline 2 s instead of 60 ms; spool events keyed by generated id; strict field allowlist; `systemMessage` reminder in ask mode (ADR-0002 update) | Internal, reversible; recorded with measurements in `evidence/phase-1/1A-4.md` |
+| D33 | Redaction rule set gained command-line credential rules after a test caught `curl -u user:pass` reaching the spool | Done in slice 1A-4 |
 
 ## Approval rules
 

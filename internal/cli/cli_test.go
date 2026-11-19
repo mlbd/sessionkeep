@@ -13,7 +13,7 @@ import (
 func run(t *testing.T, env map[string]string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var o, e bytes.Buffer
-	code = Run(args, &o, &e, func(k string) string { return env[k] })
+	code = Run(args, strings.NewReader(""), &o, &e, func(k string) string { return env[k] })
 	return code, o.String(), e.String()
 }
 
@@ -97,7 +97,7 @@ func TestUnknownCommandAndArgument(t *testing.T) {
 
 // Commands that are not built must not appear to exist (docs/09: no command without a truthful capability).
 func TestUnbuiltCommandsAreRejected(t *testing.T) {
-	for _, c := range []string{"hook", "mcp", "start", "memory", "remember", "review", "sync"} {
+	for _, c := range []string{"mcp", "start", "memory", "remember", "review", "sync"} {
 		if code, _, _ := run(t, nil, c); code != ExitUsage {
 			t.Fatalf("%q returned %d, want usage error", c, code)
 		}

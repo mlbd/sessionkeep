@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"sessionkeep/internal/buildinfo"
+	"sessionkeep/internal/capture"
 	"sessionkeep/internal/config"
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/store"
@@ -30,7 +31,7 @@ const (
 	ExitNeedsConsent = 4
 )
 
-const usage = `sessionkeep — local-first developer memory (pre-release; capture is not built yet)
+const usage = `sessionkeep — local-first developer memory (pre-release; events are captured to the spool but not yet ingested)
 
 Usage:
   sessionkeep setup [--auto-add manual|ask|auto] [--level LEVEL]
@@ -45,6 +46,8 @@ Usage:
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
+  sessionkeep hook EVENT               Claude Code hook entry point (reads the hook JSON on stdin;
+                                   always exits 0; not meant to be run by hand)
   sessionkeep doctor                   Read-only checks: build, data location, SQLite engine gate
   sessionkeep paths                    Show where SessionKeep keeps its data (creates nothing)
   sessionkeep version | help
@@ -87,10 +90,13 @@ type invocation struct {
 
 // Run executes one command and returns the process exit status. Results go to stdout,
 // diagnostics to stderr; with --json, errors are also a JSON envelope on stdout.
-func Run(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return ExitUsage
+	}
+	if args[0] == "hook" {
+		return hook(args[1:], stdin, stdout, getenv)
 	}
 	inv, err := parse(args, "auto-add", "level", "capture", "name")
 	if err == nil {
@@ -227,6 +233,42 @@ func dispatch(inv invocation) error {
 		return projectCmd(inv, rest)
 	}
 	return usageErr("unknown command %q; run `sessionkeep help`", cmd)
+}
+
+// hook is the Claude Code hook entry point: `sessionkeep hook <Event>` with the host's JSON on stdin.
+// It always exits 0 and prints nothing but a valid hook response, whatever goes wrong: a memory
+// tool must never block or disturb the coding session (ADR-0002).
+func hook(args []string, stdin io.Reader, stdout io.Writer, getenv func(string) string) int {
+	if len(args) != 1 {
+		return ExitOK
+	}
+	done := make(chan capture.Result, 1)
+	go func() {
+		defer func() {
+			if recover() != nil {
+				done <- capture.Result{}
+			}
+		}()
+		raw, err := io.ReadAll(io.LimitReader(stdin, 8<<20))
+		if err != nil {
+			done <- capture.Result{}
+			return
+		}
+		p, err := config.Resolve(runtime.GOOS, getenv)
+		if err != nil {
+			done <- capture.Result{}
+			return
+		}
+		st := state{paths: p}
+		done <- capture.Handle(capture.Request{HookEvent: args[0], Raw: raw, Paths: p, Env: st.env(getenv), Now: time.Now(), NewID: config.NewID})
+	}()
+	select {
+	case res := <-done:
+		stdout.Write(res.Stdout)
+	case <-time.After(capture.Deadline):
+		// Give up silently; an unfinished temp file in the spool is ignored by the ingester.
+	}
+	return ExitOK
 }
 
 // state is what the mutating commands share: resolved paths, settings with a device id, and the

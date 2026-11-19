@@ -33,6 +33,8 @@ func TestSecretsAreRemoved(t *testing.T) {
 		{"JSON assignment", `{"apiKey": "live-abc123def456", "name": "demo"}`, []string{"live-abc123def456"}, []string{`"name": "demo"`}},
 		{"base64-wrapped token", "blob " + base64.StdEncoding.EncodeToString([]byte("token="+fakeGitHub)) + " end", []string{base64.StdEncoding.EncodeToString([]byte("token=" + fakeGitHub))}, []string{"blob", "end"}},
 		{"base64-wrapped PEM, URL alphabet", "x " + base64.RawURLEncoding.EncodeToString([]byte(fakePEM)) + " y", []string{base64.RawURLEncoding.EncodeToString([]byte(fakePEM))[:40]}, []string{"x ", " y"}},
+		{"curl user flag", "curl -u admin:" + fakePass + " https://api.example.test/v1", []string{fakePass}, []string{"curl -u", "https://api.example.test/v1"}},
+		{"long credential flags", "mysql --user=root --password " + fakePass + " && tool --api-key=k-9f8e7d6c5b4a --token abcd1234efgh", []string{fakePass, "k-9f8e7d6c5b4a", "abcd1234efgh"}, []string{"mysql", "--password", "--api-key", "&& tool"}},
 		{"private marker", "public <private>my home address is 1 Synthetic Way</private> public", []string{"Synthetic Way"}, []string{"public"}},
 	}
 	for _, tc := range tests {
@@ -72,6 +74,8 @@ func TestOrdinaryTextIsLeftAlone(t *testing.T) {
 		"use_token: true",
 		"C:\\Users\\dev\\project\\secret-notes\\readme.md",
 		"SGVsbG8sIHRoaXMgaXMganVzdCBvcmRpbmFyeSB0ZXh0Lg==", // base64 of plain prose
+		"grep -u pattern file.txt && ls -u",
+		"pass --password-file ./pw.txt and --token-url https://example.test/t then --user alice",
 	} {
 		if out, n := Text(in); out != in || n != 0 {
 			t.Errorf("changed ordinary text:\n in: %q\nout: %q (count %d)", in, out, n)

@@ -261,3 +261,54 @@ func TestFlagParsing(t *testing.T) {
 	}
 	sb.ok("project", "add", app, "--capture=metadata")
 }
+
+func (sb *sandbox) hook(event, stdin string) (int, string, string) {
+	var o, e strings.Builder
+	code := Run([]string{"hook", event}, strings.NewReader(stdin), &o, &e, func(k string) string { return sb.env[k] })
+	return code, o.String(), e.String()
+}
+
+func (sb *sandbox) spoolCount() int {
+	entries, _ := os.ReadDir(filepath.Join(sb.env[config.EnvDataDir], "spool"))
+	return len(entries)
+}
+
+func TestHookCommandCapturesOnlyForRegisteredProjectsAndNeverFails(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	other := sb.dir("other")
+	in := func(cwd string) string {
+		raw, _ := json.Marshal(map[string]string{"session_id": "s-1", "cwd": cwd, "hook_event_name": "UserPromptSubmit", "prompt": "remember to use tabs"})
+		return string(raw)
+	}
+
+	// Before anything is set up: nothing written, nothing printed, exit 0.
+	if code, out, errOut := sb.hook("UserPromptSubmit", in(app)); code != ExitOK || out != "" || errOut != "" {
+		t.Fatalf("before setup: %d %q %q", code, out, errOut)
+	}
+	sb.ok("project", "add", app, "--capture", "conversation")
+
+	if code, out, errOut := sb.hook("UserPromptSubmit", in(filepath.Join(app, "src"))); code != ExitOK || out != "" || errOut != "" || sb.spoolCount() != 1 {
+		t.Fatalf("registered: %d %q %q spool=%d", code, out, errOut, sb.spoolCount())
+	}
+	if code, out, _ := sb.hook("UserPromptSubmit", in(other)); code != ExitOK || out != "" || sb.spoolCount() != 1 {
+		t.Fatalf("unregistered prompt must write and print nothing: %d %q spool=%d", code, out, sb.spoolCount())
+	}
+	if code, out, _ := sb.hook("SessionStart", in(other)); code != ExitOK || !strings.Contains(out, "systemMessage") || sb.spoolCount() != 1 {
+		t.Fatalf("unregistered session start should only remind: %d %q", code, out)
+	}
+	for _, bad := range [][2]string{{"UserPromptSubmit", "{broken"}, {"UserPromptSubmit", ""}, {"NoSuchEvent", in(app)}} {
+		if code, out, errOut := sb.hook(bad[0], bad[1]); code != ExitOK || out != "" || errOut != "" {
+			t.Fatalf("%v: %d %q %q", bad, code, out, errOut)
+		}
+	}
+	// Wrong argument counts are also silent successes on the hook path.
+	for _, args := range [][]string{{"hook"}, {"hook", "Stop", "extra"}, {"hook", "--json"}} {
+		if code, out, errOut := sb.run(args...); code != ExitOK || out != "" || errOut != "" {
+			t.Fatalf("%v: %d %q %q", args, code, out, errOut)
+		}
+	}
+	if sb.spoolCount() != 1 {
+		t.Fatalf("spool=%d, want 1", sb.spoolCount())
+	}
+}

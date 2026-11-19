@@ -34,6 +34,9 @@ var (
 		{"auth-header", regexp.MustCompile(`(?i)\b((?:proxy-)?authorization)(["']?\s*[:=]\s*["']?)(?:bearer|basic|token|digest)\s+[A-Za-z0-9._~+/=-]{4,}`), "$1$2[REDACTED:auth-header]"},
 		{"auth-header", regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}`), "[REDACTED:auth-header]"},
 		{"url-credentials", regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^\s/:@"'\[\]]+:[^\s/@"'\[\]]+@`), "$1[REDACTED:url-credentials]@"},
+		// Command-line credentials: curl/wget -u user:pass, and --password VALUE style flags.
+		{"cli-credentials", regexp.MustCompile(`(^|\s)(-u|--user)(\s+|=)[^\s:"'\[\]]+:[^\s"'\[\]]+`), "$1$2$3[REDACTED:cli-credentials]"},
+		{"cli-credentials", regexp.MustCompile(`(?i)(--(?:password|passwd|pass|token|api-?key|secret|access-?key|auth)(?:\s+|=))[^\s"'\[\]-][^\s"'\[\]]{3,}`), "$1[REDACTED:cli-credentials]"},
 		{"token", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`), "[REDACTED:token]"},
 		{"token", regexp.MustCompile(`\b(?:sk|rk|pk)[-_](?:live|test|proj|ant|or)?[-_]?[A-Za-z0-9_-]{20,}`), "[REDACTED:token]"},
 		{"token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{30,}`), "[REDACTED:token]"},
