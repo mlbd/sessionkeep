@@ -72,6 +72,13 @@ Usage:
                                    Generate the Claude Code plugin directory for this binary;
                                    --with-mcp also registers the optional MCP server
                                    (changes no Claude Code setting)
+  sessionkeep install [--with-mcp]     Copy this program to a stable per-user place and generate the
+                                   Claude Code plugin beside it (changes no Claude Code setting)
+  sessionkeep uninstall [--purge-data] [--yes]
+                                   Remove what install created; your data is kept unless you
+                                   ask for it to be deleted too
+  sessionkeep autostart enable|disable|status
+                                   Optional: store waiting events once when you log on
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
   sessionkeep forget record ID | captured --project P | project P   [--yes]
@@ -196,7 +203,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -313,6 +320,18 @@ func dispatch(inv invocation) error {
 		return remember(inv, rest)
 	case "instruction":
 		return instructionCmd(inv, rest)
+	case "install":
+		if len(rest) != 0 {
+			return usageErr("usage: sessionkeep install [--with-mcp]")
+		}
+		return installCmd(inv)
+	case "uninstall":
+		if len(rest) != 0 {
+			return usageErr("usage: sessionkeep uninstall [--purge-data] [--yes]")
+		}
+		return uninstallCmd(inv)
+	case "autostart":
+		return autostartCmd(inv, rest)
 	case "export":
 		return exportCmd(inv, rest)
 	case "import":
@@ -1460,6 +1479,8 @@ func doctor(inv invocation) error {
 			checks = append(checks, check{"settings", "ok", fmt.Sprintf("unregistered folders: %s; %d exclusion(s)", s.AutoAdd.Mode, len(s.Exclusions))})
 		}
 	}
+
+	checks = append(checks, installChecks(inv)...)
 
 	if e, err := store.ProbeEngine(context.Background()); err != nil {
 		checks = append(checks, check{"sqlite_engine", "failed", err.Error()})

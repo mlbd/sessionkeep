@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/install"
 )
 
 // sandbox gives each test its own data directory and a work area, both with awkward names.
@@ -26,7 +27,9 @@ func newSandbox(t *testing.T) *sandbox {
 	}
 	// HOME/USERPROFILE point at a sibling so the work area is not "inside home".
 	home := filepath.Join(base, "home")
-	return &sandbox{t: t, work: work, env: map[string]string{config.EnvDataDir: filepath.Join(base, "data dir"), "HOME": home, "USERPROFILE": home}}
+	// The install location is always a sandbox folder too, so no test can see or touch a real installation.
+	return &sandbox{t: t, work: work, env: map[string]string{config.EnvDataDir: filepath.Join(base, "data dir"), "HOME": home, "USERPROFILE": home,
+		install.EnvInstallDir: filepath.Join(base, "not installed")}}
 }
 
 func (sb *sandbox) dir(parts ...string) string {

@@ -149,6 +149,14 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D63 | Deletion (`forget`) previews, then deletes, drops matching spooled events, rebuilds the search index and rewrites the database file; an audit row keeps counts only | Implements the deletion rules in `docs/01-DATA_MODEL.md` §5 |
 | D64 | The database copy for export is taken with `VACUUM INTO` on the writer connection under the lease | Follows finding B1 (a separate-connection backup restarts under write load) |
 
+## Session 13 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D65 | `sessionkeep install` copies the program to a per-user folder and generates the plugin plus a one-plugin local marketplace; it prints the two `claude plugin` commands and edits no Claude Code setting. `uninstall` removes only recorded files and keeps data unless `--purge-data --yes` | Follows D48 and the "do not mutate global Claude configuration" rule |
+| D66 | Auto-start uses the current user's "Run at logon" registry list, not a scheduled task | **Changed from the agreed default 5**: Windows refused to create a logon-triggered task without administrator rights. Same effect, no elevation; owner to note |
+| D67 | Auto-start is opt-in and only stores waiting events once at logon; there is still no resident process | Follows ADR-0003 |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

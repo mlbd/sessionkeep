@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-20 06:30 UTC • **Project name:** SessionKeep • **Active phase:** 1B (Phase 1A slices 1A-1 … 1A-9 are built; the 1A owner demo has not happened) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. On 2026-11-20 the owner asked for the rest of Phase 1 to be done in one run and accepted the defaults listed in `DECISIONS.md` (session 9). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 08:00 UTC • **Project name:** SessionKeep • **Active phase:** 1B (Phase 1A slices 1A-1 … 1A-9 are built; the 1A owner demo has not happened) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. On 2026-11-20 the owner asked for the rest of Phase 1 to be done in one run and accepted the defaults listed in `DECISIONS.md` (session 9). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## What exists (Go module `sessionkeep`, CGO-free)
 
@@ -14,19 +14,20 @@
 - **MCP (optional):** `sessionkeep mcp` with four read-only tools; `plugin write --with-mcp`.
 - **Dashboard:** `sessionkeep dashboard` — loopback-only server, one-time sign-in link, six plain pages (overview, projects/onboarding, search, instructions, resume, diagnostics). **Not yet looked at in a browser by anyone.**
 - **Data control:** `export FILE` (unencrypted zip with manifest), `import FILE [--dry-run]` (empty data directory only), `forget record|captured|project` with preview; deletion buttons in the dashboard.
-- **Not built:** installer and auto-start, engine process.
+- **Lifecycle:** `install [--with-mcp]`, `uninstall [--purge-data] [--yes]`, `autostart enable|disable|status` (per-user logon entry, Windows only), install checks in `doctor`.
+- **Not built:** a resident engine process (by design so far), signing, updates.
 
-## Latest session record (session 12, 2026-11-20)
+## Latest session record (session 13, 2026-11-20)
 
 - Agent, working tree: Claude Code (claude-fable-5-2). Local commits on `main`, no remote. See `git log`.
-- Slices done in this run so far: 1A-9, 1B-1 (MCP), 1B-2 (dashboard), 1B-3 (export/import/delete). `bash scripts/check.sh` → CHECK PASSED after each.
-- 1B-3: export under concurrent capture lost nothing; restore into a fresh profile works end to end; eleven damaged or hostile archives refused; deleted text verified absent from search, every file in the data directory and a later export. A real defect was found and fixed on the way (deleted words surviving in the search index; one path skipping compaction).
+- Slices done in this run so far: 1A-9, 1B-1, 1B-2, 1B-3, 1B-4. `bash scripts/check.sh` → CHECK PASSED after each, with one exception recorded in `evidence/phase-1/1B-3.md` (an intermittent failure that exposed a real defect in the drain; fixed, suite then green ten times in a row).
+- 1B-4: real install into a sandbox works from a folder with spaces and accents; Claude Code accepted the generated marketplace and plugin in an isolated profile; the owner's Claude settings digest is unchanged; a logon-triggered scheduled task could not be created without administrator rights, so auto-start uses the per-user logon list instead (D66); the entry was created, run by hand and removed.
 - Four of ten pre-approved live sessions used. `go test -race` still **not run**.
-- Evidence: `evidence/phase-1/1B-3.md`. Decisions: `DECISIONS.md` session 12.
+- Evidence: `evidence/phase-1/1B-4.md`. Decisions: `DECISIONS.md` session 13.
 
 ## Not yet verified
 
-How the dashboard pages look and behave in a real browser (layout, contrast, keyboard flow, phone width). Interactive-mode sessions; SessionStart re-injection after compaction/resume; the confirm half of the `remember` skill; coexistence with the owner's other plugins; installation into the real Claude Code configuration; search speed on a large store; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
+A real install on the owner's machine and a real Windows logon running the auto-start entry; whether any console window appears. How the dashboard pages look and behave in a real browser (layout, contrast, keyboard flow, phone width). Interactive-mode sessions; SessionStart re-injection after compaction/resume; the confirm half of the `remember` skill; coexistence with the owner's other plugins; installation into the real Claude Code configuration; search speed on a large store; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
 
 ## Blockers / awaiting owner
 
@@ -34,7 +35,7 @@ None blocking. For the owner: look at the dashboard pages (`sessionkeep dashboar
 
 ## Next smallest task and acceptance checks
 
-**1B-4** (`phases/PHASE_1_PLAN.md`): install, doctor, uninstall, auto-start. `sessionkeep install` copies the binary to a stable per-user location, generates the plugin beside it, and prints the exact Claude Code command to enable it (the owner runs that; SessionKeep edits no Claude setting); `sessionkeep uninstall` removes what install created and keeps the data unless `--purge-data` is confirmed; `sessionkeep autostart enable|disable|status` manages a per-user logon task for the background drain; `doctor` checks the installed binary path against the plugin's hooks. Pass = T01/T02 subset on the reference machine in a sandbox profile: install twice is idempotent; paths with spaces and non-ASCII work; uninstall leaves no owned file and no task, and the data intact; the scheduled task is created and removed for real and left removed; no console window flashes are caused by hooks (checked by process flags, not by eye); `bash scripts/check.sh` green; `evidence/phase-1/1B-4.md`. Then 1B-5 (acceptance run, race detector, benchmarks).
+**1B-5** (`phases/PHASE_1_PLAN.md`): Phase 1 acceptance run. Put a C compiler in `.tools` and run the suite with the race detector; measure on the reference machine: hook latency, search latency and database size at 100k stored records, drain throughput, idle memory of each optional process; run the required end-to-end demonstration from `phases/PHASE_1.md` as one script against the real binary (register, live session with an instruction, stop/second session, recall, supersede, 90-day age, second project isolation, export, restore, compare); walk the T01–T09, T18, T21, T23 rows and mark each pass / partial / not run with the evidence file; write `evidence/phase-1/ACCEPTANCE.md` and the Phase 1 gate summary for the owner. Nothing in it may be marked passed without a run behind it.
 
 ## Update template
 

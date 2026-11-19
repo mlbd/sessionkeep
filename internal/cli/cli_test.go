@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -97,7 +98,7 @@ func TestUnknownCommandAndArgument(t *testing.T) {
 
 // Commands that are not built must not appear to exist (docs/09: no command without a truthful capability).
 func TestUnbuiltCommandsAreRejected(t *testing.T) {
-	for _, c := range []string{"start", "search", "review", "sync", "travel", "review", "sync"} {
+	for _, c := range []string{"start", "search", "review", "sync", "travel", "update", "review", "sync"} {
 		if code, _, _ := run(t, nil, c); code != ExitUsage {
 			t.Fatalf("%q returned %d, want usage error", c, code)
 		}
@@ -105,7 +106,7 @@ func TestUnbuiltCommandsAreRejected(t *testing.T) {
 }
 
 func TestDoctorReportsEngineAndWhatItDidNotCheck(t *testing.T) {
-	code, out, _ := run(t, map[string]string{config.EnvDataDir: absDir()}, "doctor", "--json")
+	code, out, _ := run(t, map[string]string{config.EnvDataDir: absDir(), "SESSIONKEEP_INSTALL_DIR": filepath.Join(t.TempDir(), "none")}, "doctor", "--json")
 	var got struct {
 		Data struct {
 			Healthy    bool
@@ -116,7 +117,7 @@ func TestDoctorReportsEngineAndWhatItDidNotCheck(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("bad JSON: %v: %q", err, out)
 	}
-	if code != ExitOK || !got.Data.Healthy || len(got.Data.Checks) != 4 || got.Data.NotChecked == "" {
+	if code != ExitOK || !got.Data.Healthy || len(got.Data.Checks) != 5 || got.Data.NotChecked == "" {
 		t.Fatalf("code=%d data=%+v", code, got.Data)
 	}
 	for _, c := range got.Data.Checks {
