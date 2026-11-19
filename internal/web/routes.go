@@ -122,6 +122,22 @@ func (s *Server) routes(mux *http.ServeMux) {
 		q := r.URL.Query()
 		s.command(w, append(append([]string{"memory", "get"}, scope(q.Get("project"), q.Get("all") == "1")...), "--", r.PathValue("id"))...)
 	})
+	mux.HandleFunc("GET /api/sessions", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		args := append([]string{"session", "list"}, scope(q.Get("project"), q.Get("all") == "1")...)
+		if v := q.Get("limit"); v != "" {
+			if _, err := strconv.Atoi(v); err != nil {
+				fail(w, http.StatusBadRequest, "usage", "limit must be a number")
+				return
+			}
+			args = append(args, flag("limit", v))
+		}
+		s.command(w, args...)
+	})
+	mux.HandleFunc("GET /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		s.command(w, append(append([]string{"session", "show"}, scope(q.Get("project"), q.Get("all") == "1")...), "--", r.PathValue("id"))...)
+	})
 	mux.HandleFunc("GET /api/resume", func(w http.ResponseWriter, r *http.Request) {
 		s.command(w, "resume", flag("project", r.URL.Query().Get("project")))
 	})

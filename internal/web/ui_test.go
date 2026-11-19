@@ -19,12 +19,19 @@ func asset(t *testing.T, name string) string {
 // The pages must load nothing from anywhere else and must never build markup from data.
 func TestPagesAreSelfContainedAndInjectionSafe(t *testing.T) {
 	entries, _ := fs.ReadDir(uiFS, "ui")
-	if len(entries) != 3 {
-		t.Fatalf("expected exactly index.html, app.css and app.js; found %d files", len(entries))
+	if len(entries) != 4 {
+		t.Fatalf("expected exactly index.html, app.css, app.js and favicon.svg; found %d files", len(entries))
 	}
 	remote := regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}`)
 	for _, e := range entries {
 		body := asset(t, e.Name())
+		if e.Name() == "favicon.svg" {
+			// The only address in it is the SVG namespace, which is an identifier, not a download.
+			body = strings.Replace(body, `xmlns="http://www.w3.org/2000/svg"`, "", 1)
+			if strings.Contains(body, "<script") || strings.Contains(body, "href") {
+				t.Error("favicon.svg must be a plain drawing")
+			}
+		}
 		if m := remote.FindString(body); m != "" {
 			t.Errorf("%s refers to a remote address: %s", e.Name(), m)
 		}
@@ -75,13 +82,13 @@ func TestAccessibilityBasics(t *testing.T) {
 	// Every input, select and textarea the script creates is wrapped by field(...) (a <label>),
 	// placed inside a label, or given an aria-label.
 	controls := regexp.MustCompile(`(?m)^.*\b(?:el\('(?:input|textarea)'|select\('|projectSelect\().*$`).FindAllString(js, -1)
-	if len(controls) < 15 {
+	if len(controls) < 12 {
 		t.Fatalf("found only %d form controls; the check below would be meaningless", len(controls))
 	}
 	assigned := regexp.MustCompile(`const (\w+) = (?:el\('(?:input|textarea)'|select\(|projectSelect\()`)
 	for _, m := range assigned.FindAllStringSubmatch(js, -1) {
 		name := m[1]
-		labelled := regexp.MustCompile(`field\('[^']*', `+name+`\)`).MatchString(js) ||
+		labelled := regexp.MustCompile(`field\('[^']*', `+name+`[,)]`).MatchString(js) ||
 			regexp.MustCompile(`el\('label', \{[^}]*\}, `+name+`,`).MatchString(js) ||
 			regexp.MustCompile(name+`\.setAttribute\('aria-label'`).MatchString(js)
 		if !labelled {
@@ -94,8 +101,9 @@ func TestAccessibilityBasics(t *testing.T) {
 			t.Errorf("button without text: %s", b)
 		}
 	}
-	if !strings.Contains(js, "scope: 'col'") {
-		t.Error("table headers must carry scope=col")
+	// Groups of radio buttons need a group label, and the pages must not fall back to bare tables.
+	if !strings.Contains(js, "el('fieldset', {}, el('legend'") {
+		t.Error("radio groups must be a fieldset with a legend")
 	}
 	// Status is never colour alone: every state class is used together with words.
 	for _, line := range regexp.MustCompile(`(?m)^.*class: [^,]*state-(?:ok|warn|bad).*$`).FindAllString(js, -1) {

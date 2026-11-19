@@ -58,6 +58,7 @@ Usage:
                                    Search stored conversation text. Scope is the current
                                    project unless you say otherwise.
   sessionkeep memory get ID            Show one stored record in full, with where it came from
+  sessionkeep session list | show ID   Browse captured sessions and read one in full
   sessionkeep checkpoint "TEXT"        Record where work stands (what is done, what is next) with the
                                    current Git branch, commit and uncommitted state
   sessionkeep resume                   Print a continuation pack: instructions, latest checkpoint, a
@@ -307,6 +308,8 @@ func dispatch(inv invocation) error {
 			return usageErr("status takes no arguments")
 		}
 		return status(inv)
+	case "session":
+		return sessionCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":
@@ -771,6 +774,77 @@ func projectCmd(inv invocation, rest []string) error {
 		return inv.emit(after, fmt.Sprintf("project %.8s: %s\n", after.ID, state))
 	}
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
+}
+
+// sessionCmd lists captured sessions and shows one in full. Read-only.
+func sessionCmd(inv invocation, rest []string) error {
+	if err := inv.only("project", "all-projects", "limit"); err != nil {
+		return err
+	}
+	if !(len(rest) == 1 && rest[0] == "list") && !(len(rest) == 2 && rest[0] == "show") {
+		return usageErr("usage: sessionkeep session list [--project ID_OR_PATH | --all-projects] [--limit N]\n       sessionkeep session show ID [--project ID_OR_PATH | --all-projects]")
+	}
+	all := inv.flags["all-projects"] != ""
+	if all && inv.flags["project"] != "" {
+		return usageErr("--project and --all-projects cannot be combined")
+	}
+	st, err := load(inv, false)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	s, err := store.OpenReadOnly(ctx, st.paths.DBPath)
+	if err != nil {
+		if errors.Is(err, store.ErrNeedsSetup) || errors.Is(err, store.ErrSchemaTooNew) {
+			return &cmdError{ExitUnavailable, "database_unavailable", err.Error()}
+		}
+		return err
+	}
+	defer s.Close()
+	var proj store.Project
+	if !all {
+		if proj, err = resolveProject(ctx, inv, st, s, inv.flags["project"]); err != nil {
+			return err
+		}
+	}
+	if rest[0] == "list" {
+		limit := 0
+		if v := inv.flags["limit"]; v != "" {
+			if limit, err = strconv.Atoi(v); err != nil || limit < 1 {
+				return usageErr("--limit must be a positive number (got %q)", v)
+			}
+		}
+		list, err := s.Sessions(ctx, proj.ID, limit)
+		if err != nil {
+			return err
+		}
+		var b strings.Builder
+		for _, x := range list {
+			fmt.Fprintf(&b, "%.8s  %.16s  %-8s %3d text(s)  %s\n", x.ID, strings.Replace(x.StartedAt, "T", " ", 1), x.State, x.Texts, firstRunes(x.FirstPrompt, 90))
+		}
+		if len(list) == 0 {
+			b.WriteString("no sessions captured yet\n")
+		}
+		return inv.emit(list, b.String())
+	}
+	info, turns, err := s.SessionTurns(ctx, rest[1], proj.ID, all)
+	if errors.Is(err, store.ErrNoSession) {
+		return failErr("not_found", "no captured session matches %q in that scope (use at least 8 characters of an id from `sessionkeep session list`)", rest[1])
+	}
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "session %s in project %q\nstarted %s, last activity %s, %s\n", info.ID, info.ProjectName, info.StartedAt, info.LastAt, info.State)
+	for _, t := range turns {
+		switch {
+		case t.Text != "":
+			fmt.Fprintf(&b, "\n[%s, %.19s]\n%s\n", t.Who, strings.Replace(t.ObservedAt, "T", " ", 1), t.Text)
+		case t.Tool != "":
+			fmt.Fprintf(&b, "\n(tool: %s)\n", t.Tool)
+		}
+	}
+	return inv.emit(map[string]any{"session": info, "turns": turns}, b.String())
 }
 
 // workDir picks the folder whose Git state belongs to a project for this invocation: the folder
