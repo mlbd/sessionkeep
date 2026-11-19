@@ -100,6 +100,15 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D42 | `remember` has no default scope and saves nothing without `--yes`; text that looks like a secret is refused, not redacted; one instruction is at most 4,000 characters | Internal; follows the no-default rule of ADR-0007 |
 | D43 | Every atomically written file has a second copy (`.alt`) that readers fall back to, because a file being replaced was measured to look missing for up to 65 ms on the reference machine | Internal; forced by an intermittent test failure (`evidence/phase-1/1A-7.md`) |
 
+## Session 8 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D44 | Search always needs exactly one scope: the current (or named) project, or the explicit `--all-projects` flag. Reading a record by id is subject to the same check | Implements R05 / spec "cross-project ID requires scope check" |
+| D45 | Queries are "all these words", each word quoted so punctuation and operator words are never interpreted; if nothing matches, the query is retried as one literal string | Internal; chosen for exact recall of errors, paths and ids |
+| D46 | Command output uses plain ASCII for its own text (match markers `**`, `...`, `-`) | Internal; Windows console showed garbage for typographic characters |
+| D47 | The generated plugin carries two skills, `recall` and `remember`; `remember` instructs Claude to preview, ask the user, and only then save | Not yet exercised live |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

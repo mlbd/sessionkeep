@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ const (
 	ExitNeedsConsent = 4
 )
 
-const usage = `sessionkeep — local-first developer memory (pre-release; the Claude Code plugin is not built yet)
+const usage = `sessionkeep - local-first developer memory (pre-release; the Claude Code plugin is not built yet)
 
 Usage:
   sessionkeep setup [--auto-add manual|ask|auto] [--level LEVEL]
@@ -51,6 +52,11 @@ Usage:
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
+  sessionkeep memory search "QUERY" [--project ID_OR_PATH | --all-projects] [--exact]
+                 [--who user|assistant|tool] [--since DATE] [--until DATE] [--limit N] [--cursor C]
+                                   Search stored conversation text. Scope is the current
+                                   project unless you say otherwise.
+  sessionkeep memory get ID            Show one stored record in full, with where it came from
   sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]
                                    Record a standing instruction, word for word. Without --yes it
                                    only shows what would be saved. TEXT may be - to read stdin.
@@ -125,7 +131,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -164,7 +170,7 @@ func parse(args []string, valueFlags ...string) (invocation, error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all") && !hasVal { // the two switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -268,6 +274,8 @@ func dispatch(inv invocation) error {
 			return usageErr("status takes no arguments")
 		}
 		return status(inv)
+	case "memory", "evidence":
+		return memoryCmd(inv, cmd, rest)
 	case "remember":
 		return remember(inv, rest)
 	case "instruction":
@@ -454,11 +462,11 @@ func setup(inv invocation) error {
 func describeMode(a config.AutoAdd) string {
 	switch a.Mode {
 	case config.ModeManual:
-		return "manual — nothing is saved until you run `sessionkeep project add`"
+		return "manual - nothing is saved until you run `sessionkeep project add`"
 	case config.ModeAuto:
-		return fmt.Sprintf("auto — registered automatically at level %q (except excluded folders)", a.Level)
+		return fmt.Sprintf("auto - registered automatically at level %q (except excluded folders)", a.Level)
 	}
-	return "ask — nothing is saved; you get a reminder to run `sessionkeep project add`"
+	return "ask - nothing is saved; you get a reminder to run `sessionkeep project add`"
 }
 
 func exclude(inv invocation, rest []string) error {
@@ -512,7 +520,7 @@ func exclude(inv invocation, rest []string) error {
 
 func projectCmd(inv invocation, rest []string) error {
 	if len(rest) == 0 {
-		return usageErr("usage: sessionkeep project add|list|pause|resume|capture|which …")
+		return usageErr("usage: sessionkeep project add|list|pause|resume|capture|which ...")
 	}
 	sub, args := rest[0], rest[1:]
 	switch sub {
@@ -691,6 +699,142 @@ func projectCmd(inv invocation, rest []string) error {
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
 }
 
+// when turns a date (YYYY-MM-DD) or an RFC 3339 time into the form stored timestamps compare with.
+func when(flag, v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t.UTC().Format(time.RFC3339), nil
+	}
+	return "", usageErr("--%s must be a date like 2026-11-19 or a time like 2026-11-19T14:30:00Z (got %q)", flag, v)
+}
+
+// pendingEvents counts captured events not yet in the database, so a search can say that its
+// answer may be incomplete instead of implying it looked at everything.
+func pendingEvents(p config.Paths) int {
+	n := 0
+	if entries, err := os.ReadDir(p.SpoolDir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".evt") {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// memoryCmd searches and reads stored text. It only reads: no lease, no writes.
+// In this phase a "memory" is a stored piece of original text, so `evidence get` and `memory get`
+// are the same lookup.
+func memoryCmd(inv invocation, cmd string, rest []string) error {
+	usageText := `usage: sessionkeep memory search "QUERY" [--project ID_OR_PATH | --all-projects] [--exact] [--who user|assistant|tool] [--since DATE] [--until DATE] [--limit N] [--cursor C]
+       sessionkeep memory get ID [--project ID_OR_PATH | --all-projects]   (also: sessionkeep evidence get ID)`
+	if len(rest) != 2 || (rest[0] != "search" && rest[0] != "get") || (cmd == "evidence" && rest[0] != "get") {
+		return usageErr("%s", usageText)
+	}
+	if rest[0] == "search" {
+		if err := inv.only("project", "all-projects", "exact", "who", "since", "until", "limit", "cursor"); err != nil {
+			return err
+		}
+	} else if err := inv.only("project", "all-projects"); err != nil {
+		return err
+	}
+	all := inv.flags["all-projects"] != ""
+	if all && inv.flags["project"] != "" {
+		return usageErr("--project and --all-projects cannot be combined")
+	}
+	st, err := load(inv, false)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	s, err := store.OpenReadOnly(ctx, st.paths.DBPath)
+	if err != nil {
+		if errors.Is(err, store.ErrNeedsSetup) || errors.Is(err, store.ErrSchemaTooNew) {
+			return &cmdError{ExitUnavailable, "database_unavailable", err.Error()}
+		}
+		return err
+	}
+	defer s.Close()
+
+	var proj store.Project
+	if !all {
+		if proj, err = resolveProject(ctx, inv, st, s, inv.flags["project"]); err != nil {
+			return err
+		}
+	}
+	scope := "all projects"
+	if !all {
+		scope = fmt.Sprintf("project %q (%.8s)", proj.Name, proj.ID)
+	}
+	pending := pendingEvents(st.paths)
+
+	if rest[0] == "get" {
+		rec, err := s.GetEvidence(ctx, rest[1], proj.ID, all)
+		if errors.Is(err, store.ErrNoEvidence) {
+			return failErr("not_found", "no stored record matches %q in %s (use at least 8 characters of an id from a search)", rest[1], scope)
+		}
+		if err != nil {
+			return err
+		}
+		text := fmt.Sprintf("record %s\nproject: %s (%.8s)\nsaid by: %s (%s)\nwhen:    %s\nsession: %s\ncomplete: %s; redactions: %d\n----\n%s\n",
+			rec.ID, rec.ProjectName, rec.ProjectID, rec.Who, rec.Origin, rec.ObservedAt, rec.Session, rec.Completeness, rec.RedactionCount, rec.Text)
+		return inv.emit(rec, text)
+	}
+
+	limit := 0
+	if v := inv.flags["limit"]; v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return usageErr("--limit must be a positive number (got %q)", v)
+		}
+		limit = n
+	}
+	since, err := when("since", inv.flags["since"])
+	if err != nil {
+		return err
+	}
+	until, err := when("until", inv.flags["until"])
+	if err != nil {
+		return err
+	}
+	res, err := s.Search(ctx, store.SearchParams{ProjectID: proj.ID, AllProjects: all, Query: rest[1], Exact: inv.flags["exact"] != "",
+		Who: inv.flags["who"], Since: since, Until: until, Limit: limit, Cursor: inv.flags["cursor"]})
+	if errors.Is(err, store.ErrBadCursor) {
+		return usageErr("the cursor is not valid; start the search again without --cursor")
+	}
+	if err != nil {
+		return usageErr("%v", err)
+	}
+	var b strings.Builder
+	for _, h := range res.Hits {
+		line := fmt.Sprintf("%.8s  %.16s  %-9s", h.ID, strings.Replace(h.ObservedAt, "T", " ", 1), h.Who)
+		if all {
+			line += fmt.Sprintf("  [%.8s]", h.ProjectID)
+		}
+		fmt.Fprintf(&b, "%s  %s\n", line, strings.Join(strings.Fields(h.Snippet), " "))
+	}
+	switch {
+	case len(res.Hits) == 0:
+		fmt.Fprintf(&b, "not found: nothing stored in %s matches this query\n", scope)
+	case res.NextCursor != "":
+		fmt.Fprintf(&b, "%d result(s) shown from %s; more exist - repeat with --cursor %s\n", len(res.Hits), scope, res.NextCursor)
+	default:
+		fmt.Fprintf(&b, "%d result(s) from %s; that is all of them\n", len(res.Hits), scope)
+	}
+	if pending > 0 {
+		fmt.Fprintf(&b, "note: %d captured event(s) are not stored yet and were not searched; run `sessionkeep ingest` first for a complete answer\n", pending)
+	}
+	if len(res.Hits) > 0 {
+		b.WriteString("read a full record with: sessionkeep memory get <id>\n")
+	}
+	return inv.emit(map[string]any{"hits": res.Hits, "method": res.Method, "next_cursor": res.NextCursor, "scope": scope, "not_searched_pending_events": pending}, b.String())
+}
+
 // MaxInstructionChars bounds one instruction. An instruction longer than this could crowd every
 // other one out of the session envelope (instruct.Budget is 9,000).
 const MaxInstructionChars = 4000
@@ -709,7 +853,7 @@ func readText(inv invocation, arg string) (string, error) {
 	case strings.TrimSpace(text) == "":
 		return "", usageErr("the instruction text is empty")
 	case n > MaxInstructionChars:
-		return "", usageErr("the instruction is %d characters; the limit is %d — split it into separate instructions", n, MaxInstructionChars)
+		return "", usageErr("the instruction is %d characters; the limit is %d - split it into separate instructions", n, MaxInstructionChars)
 	case strings.ContainsRune(text, 0):
 		return "", usageErr("the instruction text contains a NUL character")
 	}
@@ -857,7 +1001,7 @@ func instructionCmd(inv invocation, rest []string) error {
 				first, more = string([]rune(first)[:70]), true
 			}
 			if more {
-				first += " …"
+				first += " ..."
 			}
 			fmt.Fprintf(&b, "%.8s  %-8s rev %d  %-16s %s\n", i.ID, i.State, i.Revision, scope, first)
 		}
@@ -887,9 +1031,9 @@ func instructionCmd(inv invocation, rest []string) error {
 		var b strings.Builder
 		fmt.Fprintf(&b, "instruction %s\nscope: %s %s\nstate: %s\n", ins.ID, ins.Scope, ins.ProjectID, ins.State)
 		for _, v := range hist {
-			fmt.Fprintf(&b, "---- revision %d · %s · %s · sha256 %.12s", v.Revision, v.Status, v.CreatedAt, v.Digest)
+			fmt.Fprintf(&b, "---- revision %d | %s | %s | sha256 %.12s", v.Revision, v.Status, v.CreatedAt, v.Digest)
 			if v.Reason != "" {
-				fmt.Fprintf(&b, " · reason: %s", v.Reason)
+				fmt.Fprintf(&b, " | reason: %s", v.Reason)
 			}
 			fmt.Fprintf(&b, "\n%s\n", v.Text)
 		}
@@ -1056,7 +1200,7 @@ func status(inv invocation) error {
 	text := fmt.Sprintf("stored: %d project(s), %d session(s), %d event(s), %d text record(s), %d capture gap(s)\n", counts.Projects, counts.Sessions, counts.Events, counts.Evidence, counts.Gaps)
 	text += fmt.Sprintf("waiting in the spool: %d event(s)", pending)
 	if pending > 0 {
-		text += fmt.Sprintf(" (oldest %s) — run `sessionkeep ingest` to store them", oldest)
+		text += fmt.Sprintf(" (oldest %s) - run `sessionkeep ingest` to store them", oldest)
 	}
 	text += fmt.Sprintf("\nquarantined files: %d; gaps not yet imported: %d\nunregistered folders: %s\n", quarantined, unimported, describeMode(st.settings.AutoAdd))
 	return inv.emit(data, text)

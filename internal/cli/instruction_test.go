@@ -172,7 +172,7 @@ func TestSupersedeArchiveAndHistory(t *testing.T) {
 		t.Fatalf("after supersession the old text must not be injected:\n%s", ctx)
 	}
 	hist := sb.ok("instruction", "show", id[:8])
-	if !strings.Contains(hist, "revision 1 · superseded") || !strings.Contains(hist, "Indent with tabs.") || !strings.Contains(hist, "revision 2 · active") || !strings.Contains(hist, "team decision") {
+	if !strings.Contains(hist, "revision 1 | superseded") || !strings.Contains(hist, "Indent with tabs.") || !strings.Contains(hist, "revision 2 | active") || !strings.Contains(hist, "team decision") {
 		t.Fatalf("history must keep the old wording:\n%s", hist)
 	}
 

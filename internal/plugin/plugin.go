@@ -96,5 +96,14 @@ func Write(dir, exe, version string) error {
 			return err
 		}
 	}
+	for name, body := range Skills(exe) {
+		path := filepath.Join(dir, "skills", name, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
 }

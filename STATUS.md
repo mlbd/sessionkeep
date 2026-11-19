@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-20 00:30 UTC • **Project name:** SessionKeep • **Active phase:** 1A (slices 1A-1 … 1A-7 done; 1A-8 next) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed, not yet needed.
+**Last updated:** 2026-11-20 01:40 UTC • **Project name:** SessionKeep • **Active phase:** 1A (slices 1A-1 … 1A-8 done; 1A-9 next, then the 1A gate) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed, not yet needed.
 
 ## What exists
 
@@ -15,32 +15,34 @@
   - `internal/lease`: OS-level single-writer lock. `internal/ingest` and `sessionkeep ingest`: drain the spool into the database (auto-add projects, sessions, evidence, events; quarantine; gap import; roots cache). `sessionkeep status`: stored counts and spool backlog.
   - `internal/plugin` and `sessionkeep plugin write DIR`: generates the Claude Code plugin (exec-form capture hooks for eight events, asynchronous drain hooks after SessionStart and Stop). `sessionkeep ingest --quiet` is the silent form those hooks call.
   - `internal/instruct`, `sessionkeep remember`, `sessionkeep instruction list|show|supersede|archive`: word-for-word instructions with versions; per-project cache; the bounded session envelope returned by the SessionStart and UserPromptSubmit hooks.
+  - `sessionkeep memory search` / `memory get` (`evidence get`): project-scoped full-text and literal search over stored text, pagination, provenance; read-only, no lease. The generated plugin now includes `recall` and `remember` skills.
   - `internal/fsx`: atomic file replace that works under concurrent readers on Windows. `scripts/check.sh`: the verification gate, including compile-only builds for Linux, macOS and Windows arm64.
-- **Capture and instruction recall both work live** in test sessions (sandbox data, plugin loaded with `--plugin-dir`). **Still not installed in the owner's Claude Code**, and the real data directory has never been created. Not built: search commands, checkpoints/resume, UI, export, installer, engine/MCP, a way for Claude itself to record an instruction.
+- **Capture and instruction recall work live** in test sessions (sandbox data, plugin loaded with `--plugin-dir`); search works from the command line. **Still not installed in the owner's Claude Code**, and the real data directory has never been created. Not built: task checkpoints and `resume` (1A-9), UI, export, installer, engine/MCP.
 
-## Latest session record (session 7, 2026-11-19/20)
+## Latest session record (session 8, 2026-11-20)
 
 - Agent, working tree: Claude Code (claude-fable-5-2). Local commits on `main`, no remote. See `git log`.
-- Requirements addressed: P1-08 (slice 1A-7).
+- Requirements addressed: P1-07 CLI part (slice 1A-8).
 - Commands and results (all real):
-  - `bash scripts/check.sh` → **CHECK PASSED** at the end. One run in between **failed** (intermittent `TestReplaceWhileReading`), which led to the second-copy fix (D43).
-  - Live session: a global and a project instruction were both followed by Claude in a fresh session; reported cost USD 0.033; owner settings digest unchanged.
-  - Tests that failed for real and led to fixes: instruction order random within one second; a file being replaced looking missing to readers.
-  - Three mutation checks (envelope budget, project scope, archived versions) are each caught by tests.
+  - `bash scripts/check.sh` → **CHECK PASSED**.
+  - Real-binary walkthrough of search across two projects: recorded in the evidence file.
+  - `claude plugin validate` on the plugin with skills → Validation passed. **No live session was run**; the skills are untested in Claude Code.
+  - Four mutation checks (search scope, lookup scope, query quoting, cursor pinning) are each caught by tests.
+  - Problems fixed: non-ASCII output characters unreadable in a Windows console; a misleading hint on empty results; one generated edit that corrupted two files (restored from git).
   - `go test -race` → **not run** (no C compiler).
-- Evidence: `evidence/phase-1/1A-7.md`. Decisions: `DECISIONS.md` session 7 section (D38, D40–D43).
+- Evidence: `evidence/phase-1/1A-8.md`. Decisions: `DECISIONS.md` session 8 section (D44–D47).
 
 ## Not yet verified
 
-How reliably a long or conflicting instruction set is followed; SessionStart re-injection after compaction and on resume; interactive-mode sessions; coexistence with the owner's other plugins that inject at SessionStart; installation into the real Claude Code configuration; why a replaced file can look missing on this machine; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
+The `recall` and `remember` skills in a live session; search speed on a large store; how reliably a long instruction set is followed; SessionStart re-injection after compaction and on resume; interactive-mode sessions; coexistence with the owner's other plugins; installation into the real Claude Code configuration; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
 
 ## Blockers / awaiting owner
 
-None blocking. Open for the owner when convenient: D40 (should pausing a project also stop its instructions being recalled?).
+None blocking. A live test of the two skills needs approval (uses the Claude subscription). Open when convenient: D40 (should pausing a project also stop its instructions being recalled?).
 
 ## Next smallest task and acceptance checks
 
-**1A-8** (`phases/PHASE_1_PLAN.md`): search and evidence retrieval. `sessionkeep memory search "<query>" [--project …] [--kind …] [--since …] [--limit N] [--cursor …]` over stored text with full-text ranking plus exact matching for error strings, paths and ids; `sessionkeep memory get <id>` and `sessionkeep evidence get <id>` returning the original text with provenance (session, time, who said it, redaction and completeness); project scope enforced before ranking, cross-project search only with an explicit flag; stable pagination; skills in the generated plugin so Claude can call these commands. Pass = T06: an adversarial two-project fixture returns zero foreign rows; exact error string, file path and id lookups hit; punctuation-heavy queries do not error; a query with no match says "not found" and returns nothing; pagination returns every row exactly once; `bash scripts/check.sh` green; raw output in `evidence/phase-1/1A-8.md`.
+**1A-9** (`phases/PHASE_1_PLAN.md`): task checkpoints and `resume`. `sessionkeep checkpoint "<what is done / what is next>"` records the current task state for a project with the Git branch, HEAD and a digest of uncommitted changes (read with `git` commands only, never modifying the repository); `sessionkeep resume [--project …]` prints a continuation pack: active instructions, the latest checkpoint, the most recent exchanges, and a warning when branch, HEAD or uncommitted state differ from the checkpoint; a `resume` skill in the plugin. Pass = T08: resuming on a changed branch or with different uncommitted work warns and never touches the working tree (tree digest identical before and after); a project without Git works and says so; checkpoints are project-scoped; `bash scripts/check.sh` green; raw output in `evidence/phase-1/1A-9.md`. After 1A-9 comes the **1A gate**: an owner demo on a synthetic project and the decision whether to install into the real Claude Code configuration.
 
 ## Update template
 
