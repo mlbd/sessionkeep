@@ -28,6 +28,11 @@ const MaxTextBytes = 256 << 10
 // maxSnippetBytes bounds tool input values and tool output snippets.
 const maxSnippetBytes = 4 << 10
 
+// TimeFormat is how observed times are stored: always nine fractional digits, so comparing two
+// stored times as text agrees with comparing the instants. (time.RFC3339Nano drops trailing
+// zeros, which misorders events inside one second.) It still parses as RFC 3339.
+const TimeFormat = "2006-01-02T15:04:05.000000000Z"
+
 // Deadline is how long a hook may spend before it gives up silently. Typical runs take about
 // 15 ms; the bound exists for a stalled disk, and is generous because giving up loses the event.
 const Deadline = 2 * time.Second
@@ -178,7 +183,7 @@ func Handle(req Request) (res Result) {
 	ev := Event{
 		Version: 1, EventID: req.NewID(), Agent: "claude-code", AdapterVersion: AdapterVersion,
 		DeviceID: settings.DeviceID, ProjectID: d.ProjectID, Level: d.Level, SessionID: in.SessionID,
-		Kind: kind, HookEvent: req.HookEvent, ObservedAt: req.Now.UTC().Format(time.RFC3339Nano),
+		Kind: kind, HookEvent: req.HookEvent, ObservedAt: req.Now.UTC().Format(TimeFormat),
 		Cwd: in.Cwd, Payload: map[string]any{}, Completeness: "complete",
 		Redaction: Redaction{RuleVersion: redact.Version},
 	}
@@ -356,7 +361,7 @@ const GapLogName = "capture-gaps.jsonl"
 // gap appends one line to the gap log and returns the reason. If even that fails, the reason is
 // still returned to the caller; there is nowhere left to record it.
 func gap(req Request, reason string) string {
-	line, _ := json.Marshal(map[string]string{"at": req.Now.UTC().Format(time.RFC3339Nano), "hook_event": req.HookEvent, "reason": reason})
+	line, _ := json.Marshal(map[string]string{"at": req.Now.UTC().Format(TimeFormat), "hook_event": req.HookEvent, "reason": reason})
 	if f, err := os.OpenFile(filepath.Join(req.Paths.DataDir, GapLogName), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600); err == nil {
 		f.Write(append(line, '\n'))
 		f.Close()

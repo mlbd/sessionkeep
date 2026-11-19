@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"strings"
+	"time"
 )
 
 // SessionInfo summarises one captured session.
@@ -31,7 +33,7 @@ const sessionSelect = `select s.id, s.project_id, p.name, s.external_session_id,
 	(select count(*) from events v where v.session_id = s.id and v.project_id = s.project_id),
 	(select count(*) from events v where v.session_id = s.id and v.project_id = s.project_id and v.evidence_id is not null),
 	coalesce((select substr(e.text, 1, 160) from events v join evidence e on e.id = v.evidence_id and e.project_id = v.project_id
-		where v.session_id = s.id and v.project_id = s.project_id and e.trust_level = 'user' order by v.observed_at limit 1), '')
+		where v.session_id = s.id and v.project_id = s.project_id and e.trust_level = 'user' order by julianday(v.observed_at), v.rowid limit 1), '')
 	from sessions s join projects p on p.id = s.project_id`
 
 func scanSessions(rows *sql.Rows) ([]SessionInfo, error) {
@@ -59,7 +61,7 @@ func (s *Store) Sessions(ctx context.Context, projectID string, limit int) ([]Se
 		q += ` where s.project_id = ?`
 		args = append(args, projectID)
 	}
-	rows, err := s.db.QueryContext(ctx, q+` order by s.started_at desc, s.id limit ?`, append(args, limit)...)
+	rows, err := s.db.QueryContext(ctx, q+` order by julianday(s.started_at) desc, s.id limit ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func (s *Store) SessionTurns(ctx context.Context, idOrPrefix, projectID string, 
 	trows, err := s.db.QueryContext(ctx, `select coalesce(e.id,''), v.kind, coalesce(e.trust_level,''), v.observed_at, coalesce(e.text,''),
 		coalesce(json_extract(v.safe_payload, '$.tool_name'),''), coalesce(e.redaction_count,0)
 		from events v left join evidence e on e.id = v.evidence_id and e.project_id = v.project_id
-		where v.session_id = ? and v.project_id = ? order by v.observed_at, v.id`, info.ID, info.ProjectID)
+		where v.session_id = ? and v.project_id = ? order by v.rowid`, info.ID, info.ProjectID)
 	if err != nil {
 		return info, nil, err
 	}
@@ -120,5 +122,15 @@ func (s *Store) SessionTurns(ctx context.Context, idOrPrefix, projectID string, 
 		}
 		turns = append(turns, t)
 	}
-	return info, turns, trows.Err()
+	if err := trows.Err(); err != nil {
+		return info, nil, err
+	}
+	// Stored times drop trailing zeros ("...09.5Z" next to "...09.51Z"), so comparing them as
+	// text misorders events within one second. Compare the instants; arrival order breaks ties.
+	sort.SliceStable(turns, func(i, j int) bool {
+		a, errA := time.Parse(time.RFC3339Nano, turns[i].ObservedAt)
+		b, errB := time.Parse(time.RFC3339Nano, turns[j].ObservedAt)
+		return errA == nil && errB == nil && a.Before(b)
+	})
+	return info, turns, nil
 }

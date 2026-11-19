@@ -110,7 +110,7 @@ func Drain(ctx context.Context, d Deps) (Report, error) {
 				continue
 			}
 			if age > time.Hour {
-				if d.Store.AddGap(ctx, "partial:"+e.Name(), "spool", "partial_event_discarded", d.Now().UTC().Format(time.RFC3339Nano), false) == nil {
+				if d.Store.AddGap(ctx, "partial:"+e.Name(), "spool", "partial_event_discarded", d.Now().UTC().Format(capture.TimeFormat), false) == nil {
 					os.Remove(tmp)
 				}
 			}
@@ -164,7 +164,7 @@ func (d Deps) one(ctx context.Context, path, name string, rep *Report) error {
 	in := store.IngestInput{
 		EventID: ev.EventID, EventKey: ev.SourceKey, DeviceID: ev.DeviceID, ProjectID: ev.ProjectID,
 		Agent: ev.Agent, SessionExternal: ev.SessionID, NewSessionID: d.NewID(), AdapterVersion: ev.AdapterVersion,
-		Kind: ev.Kind, ObservedAt: ev.ObservedAt, ReceivedAt: d.Now().UTC().Format(time.RFC3339Nano),
+		Kind: ev.Kind, ObservedAt: ev.ObservedAt, ReceivedAt: d.Now().UTC().Format(capture.TimeFormat),
 		RedactionStatus: "none", EndsSession: ev.Kind == "session_end",
 	}
 	if ev.Redaction.Count > 0 {
@@ -250,7 +250,7 @@ func (d Deps) quarantine(ctx context.Context, path, name, reason string, rep *Re
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := d.Store.AddGap(ctx, "quarantine:"+name, "spool", reason, d.Now().UTC().Format(time.RFC3339Nano), false); err != nil {
+	if err := d.Store.AddGap(ctx, "quarantine:"+name, "spool", reason, d.Now().UTC().Format(capture.TimeFormat), false); err != nil {
 		return err
 	}
 	rep.Quarantined++

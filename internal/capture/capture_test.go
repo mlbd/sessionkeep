@@ -424,3 +424,18 @@ func TestMissingDataDirectoryIsLeftAlone(t *testing.T) {
 		t.Fatal("the hook created the data directory")
 	}
 }
+
+func TestStoredTimesSortAsTextInTimeOrder(t *testing.T) {
+	base := time.Date(2026, 11, 20, 10, 0, 9, 0, time.UTC)
+	// With RFC3339Nano these three sort as text in the wrong order (".5Z" after ".51Z", "09Z" last).
+	instants := []time.Time{base, base.Add(500 * time.Millisecond), base.Add(510 * time.Millisecond)}
+	for i := 1; i < len(instants); i++ {
+		a, b := instants[i-1].Format(TimeFormat), instants[i].Format(TimeFormat)
+		if !(a < b) {
+			t.Errorf("%q does not sort before %q", a, b)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, b); err != nil {
+			t.Errorf("%q no longer parses as RFC 3339: %v", b, err)
+		}
+	}
+}
