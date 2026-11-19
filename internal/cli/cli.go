@@ -80,6 +80,7 @@ Usage:
                                    ask for it to be deleted too
   sessionkeep autostart enable|disable|status
                                    Optional: store waiting events once when you log on
+  sessionkeep history import [--yes]   Bring in earlier Claude Code sessions of your projects
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
   sessionkeep forget record ID | captured --project P | project P   [--yes]
@@ -155,7 +156,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -310,6 +311,8 @@ func dispatch(inv invocation) error {
 		return status(inv)
 	case "session":
 		return sessionCmd(inv, rest)
+	case "history":
+		return historyCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":

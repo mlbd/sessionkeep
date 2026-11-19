@@ -134,3 +134,24 @@ func (s *Store) SessionTurns(ctx context.Context, idOrPrefix, projectID string, 
 	})
 	return info, turns, nil
 }
+
+// LiveSessionIDs returns the host session ids that have at least one event captured as it
+// happened (not imported from a session file). Importing those again would store the same
+// words twice.
+func (s *Store) LiveSessionIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `select distinct s.external_session_id from sessions s
+		where exists (select 1 from events v where v.session_id = s.id and v.project_id = s.project_id and v.event_key not like 'transcript:%')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}

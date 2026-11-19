@@ -214,6 +214,26 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.command(w, "checkpoint", flag("project", in.Project), "--", in.Note)
 	})
 
+	// Earlier Claude Code sessions. Without "confirm": true the answer is 409 with what would
+	// be imported; nothing is read from anywhere but Claude Code's own folder on this computer.
+	mux.HandleFunc("POST /api/history/import", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Project string `json:"project"`
+			Confirm bool   `json:"confirm"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		args := []string{"history", "import"}
+		if in.Project != "" {
+			args = append(args, flag("project", in.Project))
+		}
+		if in.Confirm {
+			args = append(args, "--yes")
+		}
+		s.command(w, args...)
+	})
+
 	// Deletion. Without "confirm": true the answer is 409 with exactly what would be removed.
 	mux.HandleFunc("POST /api/forget", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

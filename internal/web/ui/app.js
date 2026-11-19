@@ -249,6 +249,28 @@ async function projectsView() {
       : el('p', { class: 'quiet', text: 'No folders are excluded.' }),
     el('div', { class: 'table' }, el('form', { onsubmit: e => { e.preventDefault(); act('/api/exclusions', { path: ex.value }, 'Excluded.'); } },
       field('Folder to exclude', ex), el('div', {}, el('button', { type: 'submit', text: 'Exclude this folder' })))));
+
+  // Earlier sessions: check first, import only after the numbers were shown.
+  const found = el('div', { 'aria-live': 'polite' });
+  const describe = d => [
+    el('p', {}, `${d.imported ? 'Imported' : 'Found'} ${plural(d.turns, 'piece of text', 'pieces of text')} from ${plural(d.sessions, 'earlier session', 'earlier sessions')}` + (d.imported ? ` (${d.stored} new).` : '.')),
+    d.projects && d.projects.length ? el('dl', { class: 'ledger' }, d.projects.map(p => el('div', {}, el('dt', { text: p.name }), el('dd', { text: String(p.turns) })))) : null,
+    el('p', { class: 'quiet small', text: `Left out: ${plural(d.sessions_captured_live_skipped, 'session', 'sessions')} already saved as they happened, ${d.turns_in_excluded_folders} in excluded folders, ${d.turns_in_paused_or_text_free_projects} in paused or text-free projects, ${d.turns_in_unregistered_folders} in folders that are not projects. ${plural(d.secrets_removed, 'secret', 'secrets')} removed.` }),
+    d.unregistered_folders && d.unregistered_folders.length ? el('details', {}, el('summary', { text: 'Folders with earlier sessions that are not projects' }),
+      el('ul', {}, d.unregistered_folders.map(f => el('li', { class: 'path', text: `${f.name} (${f.turns})` })))) : null,
+  ];
+  const importHistory = async confirm => {
+    say('Reading Claude Code’s session files. This can take a minute.');
+    const r = await api('POST', '/api/history/import', { confirm });
+    if (r.ok) { found.replaceChildren(el('div', { class: 'preview' }, describe(r.data))); return say('Earlier sessions imported.', 'ok'); }
+    if (r.status !== 409 || !r.data) return say(problem(r), 'bad');
+    say('Nothing is imported yet.');
+    found.replaceChildren(el('div', { class: 'preview' }, describe(r.data),
+      r.data.turns ? el('button', { type: 'button', class: 'primary', text: 'Import these sessions', onclick: () => importHistory(true) }) : null));
+  };
+  view.append(el('h2', { text: 'Earlier Claude Code sessions' }),
+    el('p', { class: 'quiet', text: 'Bring in what you and Claude said before SessionKeep was installed, for the projects above. Claude’s private reasoning, tool output and images are never imported.' }),
+    el('div', {}, el('button', { type: 'button', text: 'Check what can be imported', onclick: () => importHistory(false) })), found);
 }
 
 // ---- History --------------------------------------------------------------------------------
