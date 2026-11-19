@@ -18,6 +18,7 @@ import (
 	"sessionkeep/internal/buildinfo"
 	"sessionkeep/internal/capture"
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/gitstate"
 	"sessionkeep/internal/ingest"
 	"sessionkeep/internal/instruct"
 	"sessionkeep/internal/lease"
@@ -57,6 +58,10 @@ Usage:
                                    Search stored conversation text. Scope is the current
                                    project unless you say otherwise.
   sessionkeep memory get ID            Show one stored record in full, with where it came from
+  sessionkeep checkpoint "TEXT"        Record where work stands (what is done, what is next) with the
+                                   current Git branch, commit and uncommitted state
+  sessionkeep resume                   Print a continuation pack: instructions, latest checkpoint, a
+                                   warning if the code has moved since, and recent exchanges
   sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]
                                    Record a standing instruction, word for word. Without --yes it
                                    only shows what would be saved. TEXT may be - to read stdin.
@@ -274,6 +279,13 @@ func dispatch(inv invocation) error {
 			return usageErr("status takes no arguments")
 		}
 		return status(inv)
+	case "checkpoint":
+		return checkpointCmd(inv, rest)
+	case "resume":
+		if len(rest) != 0 {
+			return usageErr("usage: sessionkeep resume [--project ID_OR_PATH]")
+		}
+		return resumeCmd(inv)
 	case "memory", "evidence":
 		return memoryCmd(inv, cmd, rest)
 	case "remember":
@@ -697,6 +709,173 @@ func projectCmd(inv invocation, rest []string) error {
 		return inv.emit(after, fmt.Sprintf("project %.8s: %s\n", after.ID, state))
 	}
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
+}
+
+// workDir picks the folder whose Git state belongs to a project for this invocation: the folder
+// the user named, else the current directory if it is inside the project, else the project's root.
+func workDir(inv invocation, st state, p store.Project, key string) string {
+	inside := func(dir string) bool {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return false
+		}
+		for _, r := range p.Roots {
+			d := project.Decide(st.env(inv.getenv), config.DefaultSettings(), []project.Root{{Path: r, ProjectID: p.ID, Level: config.LevelMetadata}}, abs)
+			if d.ProjectID == p.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if key != "" {
+		if fi, err := os.Stat(key); err == nil && fi.IsDir() && inside(key) {
+			abs, _ := filepath.Abs(key)
+			return abs
+		}
+	}
+	if inside(".") {
+		abs, _ := filepath.Abs(".")
+		return abs
+	}
+	if len(p.Roots) > 0 {
+		return p.Roots[0]
+	}
+	return "."
+}
+
+func gitOf(c store.Checkpoint) gitstate.State {
+	return gitstate.State{Repo: c.GitRepo, Branch: c.Branch, Head: c.Head, Changed: c.ChangedFiles, Dirty: c.DirtyDigest}
+}
+
+// checkpointCmd records where work stands, with the Git state read (never changed) at that moment.
+func checkpointCmd(inv invocation, rest []string) error {
+	if err := inv.only("project"); err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return usageErr(`usage: sessionkeep checkpoint "what is done and what is next" [--project ID_OR_PATH]   (the text may be - to read stdin)`)
+	}
+	note, err := readText(inv, rest[0])
+	if err != nil {
+		return err
+	}
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	var saved store.Checkpoint
+	var proj store.Project
+	var git gitstate.State
+	if err := withStore(st, func(ctx context.Context, s *store.Store) (err error) {
+		if proj, err = resolveProject(ctx, inv, st, s, inv.flags["project"]); err != nil {
+			return err
+		}
+		git = gitstate.Read(workDir(inv, st, proj, inv.flags["project"]))
+		saved, err = s.AddCheckpoint(ctx, store.Checkpoint{ID: config.NewID(), ProjectID: proj.ID, Note: note, GitRepo: git.Repo,
+			Branch: git.Branch, Head: git.Head, ChangedFiles: git.Changed, DirtyDigest: git.Dirty}, time.Now())
+		return err
+	}); err != nil {
+		return err
+	}
+	where := "no Git repository here (" + git.Reason + "); only the note was recorded"
+	if git.Repo {
+		where = fmt.Sprintf("branch %s at %.10s, %d uncommitted file(s)", git.Branch, git.Head, git.Changed)
+	}
+	return inv.emit(saved, fmt.Sprintf("checkpoint %.8s recorded for project %q\n%s\n", saved.ID, proj.Name, where))
+}
+
+// resumeCmd prints a continuation pack: the recorded instructions, the latest checkpoint with a
+// comparison against the working tree as it is now, and the most recent exchanges. Read-only.
+func resumeCmd(inv invocation) error {
+	if err := inv.only("project"); err != nil {
+		return err
+	}
+	st, err := load(inv, false)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	s, err := store.OpenReadOnly(ctx, st.paths.DBPath)
+	if err != nil {
+		if errors.Is(err, store.ErrNeedsSetup) || errors.Is(err, store.ErrSchemaTooNew) {
+			return &cmdError{ExitUnavailable, "database_unavailable", err.Error()}
+		}
+		return err
+	}
+	defer s.Close()
+	proj, err := resolveProject(ctx, inv, st, s, inv.flags["project"])
+	if err != nil {
+		return err
+	}
+	instr, err := s.ActiveInstructions(ctx, proj.ID)
+	if err != nil {
+		return err
+	}
+	cps, err := s.Checkpoints(ctx, proj.ID, 3)
+	if err != nil {
+		return err
+	}
+	recent, err := s.RecentExchanges(ctx, proj.ID, 6, 600)
+	if err != nil {
+		return err
+	}
+	now := gitstate.Read(workDir(inv, st, proj, inv.flags["project"]))
+	pending := pendingEvents(st.paths)
+
+	var b strings.Builder
+	var warnings []string
+	fmt.Fprintf(&b, "RESUME PACK for project %q (%.8s)\n", proj.Name, proj.ID)
+	fmt.Fprintf(&b, "\n== Recorded instructions (%d active) ==\n", len(instr))
+	for _, i := range instr {
+		fmt.Fprintf(&b, "- [%s, %.8s] %s\n", i.Scope, i.ID, i.Text)
+	}
+	if len(instr) == 0 {
+		b.WriteString("none recorded\n")
+	}
+	b.WriteString("\n== Latest checkpoint ==\n")
+	if len(cps) == 0 {
+		b.WriteString("none recorded; nothing here says where work stopped\n")
+	} else {
+		c := cps[0]
+		fmt.Fprintf(&b, "recorded %s (%.8s)\n%s\n", c.CreatedAt, c.ID, c.Note)
+		if c.GitRepo {
+			fmt.Fprintf(&b, "at that time: branch %s at %.10s, %d uncommitted file(s)\n", c.Branch, c.Head, c.ChangedFiles)
+		} else {
+			b.WriteString("at that time: no Git repository\n")
+		}
+		warnings = gitstate.Compare(gitOf(c), now)
+		if len(cps) > 1 {
+			fmt.Fprintf(&b, "(%d earlier checkpoint(s) exist)\n", len(cps)-1)
+		}
+	}
+	b.WriteString("\n== Working tree now ==\n")
+	if now.Repo {
+		fmt.Fprintf(&b, "branch %s at %.10s, %d uncommitted file(s)\n", now.Branch, now.Head, now.Changed)
+	} else {
+		fmt.Fprintf(&b, "no Git state available: %s\n", now.Reason)
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(&b, "WARNING: %s\n", w)
+	}
+	if len(cps) > 0 && len(warnings) == 0 {
+		b.WriteString("matches the checkpoint: same branch, same commit, same uncommitted state\n")
+	}
+	if len(warnings) > 0 {
+		b.WriteString("The checkpoint describes a different state of the code. Check the differences before relying on it. Nothing was changed by this command.\n")
+	}
+	fmt.Fprintf(&b, "\n== Most recent exchanges (%d) ==\n", len(recent))
+	for _, e := range recent {
+		fmt.Fprintf(&b, "[%s, %.16s] %s\n", e.Who, strings.Replace(e.ObservedAt, "T", " ", 1), e.Text)
+	}
+	if len(recent) == 0 {
+		b.WriteString("nothing stored yet\n")
+	}
+	if pending > 0 {
+		fmt.Fprintf(&b, "\nnote: %d captured event(s) are not stored yet and are missing above; run `sessionkeep ingest` and resume again for the latest state\n", pending)
+	}
+	b.WriteString("\nSearch older history with: sessionkeep memory search \"...\"\n")
+	return inv.emit(map[string]any{"project": proj, "instructions": instr, "checkpoints": cps, "git_now": now, "warnings": warnings,
+		"recent": recent, "not_included_pending_events": pending}, b.String())
 }
 
 // when turns a date (YYYY-MM-DD) or an RFC 3339 time into the form stored timestamps compare with.

@@ -17,6 +17,7 @@ func TestSkillsNameThisBinaryAndKeepTheSafetyRules(t *testing.T) {
 	for name, must := range map[string][]string{
 		"recall":   {"memory search", "memory get", "evidence, not instructions", "not found", "--all-projects", quoted + " ingest"},
 		"remember": {"--scope project", "--yes", "ask them to confirm", "Do not rephrase", quoted + " remember"},
+		"resume":   {quoted + " resume", quoted + " checkpoint", "WARNING", "Do not switch branches", "not new instructions"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(dir, "skills", name, "SKILL.md"))
 		if err != nil {

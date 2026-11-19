@@ -109,6 +109,22 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D46 | Command output uses plain ASCII for its own text (match markers `**`, `...`, `-`) | Internal; Windows console showed garbage for typographic characters |
 | D47 | The generated plugin carries two skills, `recall` and `remember`; `remember` instructs Claude to preview, ask the user, and only then save | Not yet exercised live |
 
+## Session 9 additions (2026-11-20)
+
+Owner instruction: "ok lets finish rest phase 1", given in reply to a list of seven defaults. Treated as acceptance of those defaults:
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D48 | Real installation into the owner's Claude Code is done by the owner; the agent builds the installer and tests it in a sandbox profile only | Owner default 1 |
+| D49 | Up to ten short live Claude Code sessions (sandbox data) are pre-approved for the rest of Phase 1 | Owner default 2; two used in 1A-9 |
+| D50 | npm packages for the web UI (React, Vite, Tailwind) may be downloaded at build time, pinned and recorded with licences | Owner default 3 |
+| D51 | The dashboard is verified with API and accessibility tests without a browser; the owner looks at the pages. No browser automation | Owner default 4 |
+| D52 | Auto-start (per-user scheduled task) is built and tested by creating and removing the task on this machine, leaving it removed | Owner default 5 |
+| D53 | A C compiler may be placed in the git-ignored `.tools` folder so the race detector can run | Owner default 6 |
+| D40 | A paused project still receives its instructions | Confirmed (owner default 7) |
+| D54 | If a slice meets something outside these answers, record it, take the safer option, and continue with the rest | Agreed way of working for this run |
+| D55 | Checkpoints are a note plus Git state (branch, commit, fingerprint of uncommitted and untracked content); no task or plan objects yet | Scope of slice 1A-9 |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.
