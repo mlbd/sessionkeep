@@ -21,7 +21,7 @@ func self(t *testing.T) string {
 func TestWriteProducesExecFormHooksForEveryEvent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "plugin dir é")
 	exe := self(t)
-	if err := Write(dir, exe, "1.2.3"); err != nil {
+	if err := Write(dir, exe, "1.2.3", false); err != nil {
 		t.Fatal(err)
 	}
 	var manifest map[string]any
@@ -83,10 +83,10 @@ func TestWriteProducesExecFormHooksForEveryEvent(t *testing.T) {
 func TestWriteRefreshesItsOwnDirectoryAndRefusesOthers(t *testing.T) {
 	exe := self(t)
 	dir := filepath.Join(t.TempDir(), "p")
-	if err := Write(dir, exe, "1"); err != nil {
+	if err := Write(dir, exe, "1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(dir, exe, "2"); err != nil {
+	if err := Write(dir, exe, "2", false); err != nil {
 		t.Fatalf("refreshing our own directory: %v", err)
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
@@ -97,7 +97,7 @@ func TestWriteRefreshesItsOwnDirectoryAndRefusesOthers(t *testing.T) {
 	foreign := filepath.Join(t.TempDir(), "someone-elses")
 	os.MkdirAll(foreign, 0o755)
 	os.WriteFile(filepath.Join(foreign, "important.txt"), []byte("keep"), 0o644)
-	if err := Write(foreign, exe, "1"); !errors.Is(err, ErrNotOurs) {
+	if err := Write(foreign, exe, "1", false); !errors.Is(err, ErrNotOurs) {
 		t.Fatalf("want ErrNotOurs, got %v", err)
 	}
 	if entries, _ := os.ReadDir(foreign); len(entries) != 1 {
@@ -107,7 +107,7 @@ func TestWriteRefreshesItsOwnDirectoryAndRefusesOthers(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "other-plugin")
 	os.MkdirAll(filepath.Join(other, ".claude-plugin"), 0o755)
 	os.WriteFile(filepath.Join(other, ".claude-plugin", "plugin.json"), []byte(`{"name":"not-sessionkeep"}`), 0o644)
-	if err := Write(other, exe, "1"); !errors.Is(err, ErrNotOurs) {
+	if err := Write(other, exe, "1", false); !errors.Is(err, ErrNotOurs) {
 		t.Fatalf("another plugin's directory: want ErrNotOurs, got %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestWriteRefreshesItsOwnDirectoryAndRefusesOthers(t *testing.T) {
 func TestWriteRejectsBadBinaryPaths(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "p")
 	for _, exe := range []string{"sessionkeep.exe", filepath.Join(t.TempDir(), "missing.exe"), t.TempDir()} {
-		if err := Write(dir, exe, "1"); err == nil {
+		if err := Write(dir, exe, "1", false); err == nil {
 			t.Errorf("Write accepted binary path %q", exe)
 		}
 	}

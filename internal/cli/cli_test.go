@@ -97,7 +97,7 @@ func TestUnknownCommandAndArgument(t *testing.T) {
 
 // Commands that are not built must not appear to exist (docs/09: no command without a truthful capability).
 func TestUnbuiltCommandsAreRejected(t *testing.T) {
-	for _, c := range []string{"mcp", "start", "search", "review", "sync", "review", "sync"} {
+	for _, c := range []string{"start", "search", "review", "sync", "dashboard", "review", "sync"} {
 		if code, _, _ := run(t, nil, c); code != ExitUsage {
 			t.Fatalf("%q returned %d, want usage error", c, code)
 		}

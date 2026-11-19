@@ -65,7 +65,7 @@ var ErrNotOurs = errors.New("directory exists and is not a SessionKeep plugin di
 
 // Write creates or refreshes the plugin directory at dir for the binary at exe (absolute path).
 // It only ever writes its own two files, and refuses a non-empty directory it did not create.
-func Write(dir, exe, version string) error {
+func Write(dir, exe, version string, withMCP bool) error {
 	if !filepath.IsAbs(exe) {
 		return fmt.Errorf("binary path must be absolute, got %q", exe)
 	}
@@ -95,6 +95,19 @@ func Write(dir, exe, version string) error {
 		if err := os.WriteFile(path, append(raw, '\n'), 0o644); err != nil {
 			return err
 		}
+	}
+	// The MCP server is optional: a resident process per session is only added when asked for.
+	mcpPath := filepath.Join(dir, ".mcp.json")
+	if withMCP {
+		raw, err := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{Name: map[string]any{"command": exe, "args": []string{"mcp"}}}}, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(mcpPath, append(raw, 10), 0o644); err != nil {
+			return err
+		}
+	} else if err := os.Remove(mcpPath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	for name, body := range Skills(exe) {
 		path := filepath.Join(dir, "skills", name, "SKILL.md")

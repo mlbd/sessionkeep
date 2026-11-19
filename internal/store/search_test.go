@@ -133,8 +133,10 @@ func TestPunctuationAndOperatorWordsNeverBreakTheQuery(t *testing.T) {
 		}
 	}
 	// Operator words are searched for, not interpreted: "OR" must not turn the query into a union.
-	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "alpha OR nonexistentword"}); len(res.Hits) != 0 {
-		t.Fatalf("OR was interpreted as an operator: %v", ids(res))
+	// "OR" is a word here, not an operator: no record has all three words, so the answer is the
+	// labelled partial-match fallback, never a plain "words" match.
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "alpha OR nonexistentword"}); res.Method != "any" || len(res.Hits) != 1 {
+		t.Fatalf("OR was interpreted as an operator: method=%s hits=%v", res.Method, ids(res))
 	}
 	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "alpha NOT delta"}); len(res.Hits) != 1 {
 		t.Fatalf("NOT was interpreted as an operator: %v", ids(res))
@@ -293,5 +295,73 @@ func TestOpenReadOnlyCannotWriteAndNeedsACurrentSchema(t *testing.T) {
 	mustExec(t, s, "delete from schema_migrations where version >= 2")
 	if _, err := OpenReadOnly(ctx, path); !errors.Is(err, ErrNeedsSetup) {
 		t.Fatalf("older schema: %v", err)
+	}
+}
+
+func TestWordEndingsAndPartialMatches(t *testing.T) {
+	s, _ := openTemp(t)
+	seed(t, s)
+	want := fill(t, s, "proj-A",
+		"We decided the staging database is refreshed every Tuesday night, and the owner is the data team.",
+		"The migrations were running slowly on Friday.",
+		"Unrelated note about fonts.")
+	fill(t, s, "proj-B", "staging database refresh owner SECRET-B")
+
+	// Different word endings than the stored sentence: still a full "words" match.
+	res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "staging database refresh owner"})
+	if res.Method != "words" || len(res.Hits) != 1 || res.Hits[0].ID != want[0] {
+		t.Fatalf("stemmed search: method=%s hits=%v", res.Method, ids(res))
+	}
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "migration run"}); res.Method != "words" || len(res.Hits) != 1 || res.Hits[0].ID != want[1] {
+		t.Fatalf("stemmed search 2: method=%s hits=%v", res.Method, ids(res))
+	}
+	// Stemming is rule-based and incomplete ("slow" does not match "slowly"); such a query is
+	// still answered, by the labelled partial-match fallback.
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "migration run slow"}); res.Method != "any" || len(res.Hits) != 1 || res.Hits[0].ID != want[1] {
+		t.Fatalf("near miss: method=%s hits=%v", res.Method, ids(res))
+	}
+	// One word is not in the record at all: labelled partial match, still inside the project.
+	res = search(t, s, SearchParams{ProjectID: "proj-A", Query: "staging database kubernetes"})
+	if res.Method != "any" || len(res.Hits) != 1 || res.Hits[0].ID != want[0] {
+		t.Fatalf("partial match: method=%s hits=%v", res.Method, ids(res))
+	}
+	for _, h := range res.Hits {
+		if h.ProjectID != "proj-A" {
+			t.Fatal("partial-match fallback crossed projects")
+		}
+	}
+	// Nothing in common at all: still nothing, reported as a plain miss.
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "kubernetes helm chart"}); len(res.Hits) != 0 || res.Method != "words" {
+		t.Fatalf("total miss: %+v", res)
+	}
+	// Exact mode never falls back to partial matches.
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "staging database kubernetes", Exact: true}); len(res.Hits) != 0 {
+		t.Fatalf("exact mode returned partial matches: %v", ids(res))
+	}
+}
+
+// An existing database gets its index rebuilt by the stemming migration.
+func TestStemmingMigrationRebuildsAnExistingIndex(t *testing.T) {
+	s, path := openTemp(t)
+	seed(t, s)
+	fill(t, s, "proj-A", "the cache was invalidated twice")
+	// Put the index back to how migration 0001 left it, then forget migration 0004 ran.
+	mustExec(t, s, `drop trigger evidence_fts_insert; drop trigger evidence_fts_delete; drop table evidence_fts;
+		create virtual table evidence_fts using fts5(text, content='evidence', content_rowid='seq', tokenize='unicode61');
+		create trigger evidence_fts_insert after insert on evidence when new.text is not null begin insert into evidence_fts(rowid, text) values (new.seq, new.text); end;
+		create trigger evidence_fts_delete after delete on evidence when old.text is not null begin insert into evidence_fts(evidence_fts, rowid, text) values ('delete', old.seq, old.text); end;
+		insert into evidence_fts(evidence_fts) values ('rebuild');
+		delete from schema_migrations where version = 4;`)
+	if res := search(t, s, SearchParams{ProjectID: "proj-A", Query: "invalidate", Exact: false}); res.Method == "words" && len(res.Hits) == 1 {
+		t.Fatal("test setup wrong: the old index already stems")
+	}
+	s.Close()
+	s2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if res := search(t, s2, SearchParams{ProjectID: "proj-A", Query: "invalidate"}); res.Method != "words" || len(res.Hits) != 1 {
+		t.Fatalf("after migrating: method=%s hits=%d", res.Method, len(res.Hits))
 	}
 }

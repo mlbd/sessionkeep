@@ -78,8 +78,10 @@ type Hit struct {
 
 // SearchResult is one page of hits.
 type SearchResult struct {
-	Hits       []Hit  `json:"hits"`
-	Method     string `json:"method"` // words | exact
+	Hits []Hit `json:"hits"`
+	// Method says how the hits were found: "words" (every word present, word endings ignored),
+	// "exact" (the query as one literal string) or "any" (only some of the words present).
+	Method     string `json:"method"`
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
@@ -108,6 +110,16 @@ func ftsQuery(q string) string {
 		return `"` + strings.Join(terms, " ") + `"`
 	}
 	return `"` + strings.Join(terms, `" "`) + `"`
+}
+
+// ftsAnyQuery is the fallback form: records containing any of the words, best matches first.
+// It returns "" when there is only one word (the all-words search already covered it).
+func ftsAnyQuery(q string) string {
+	all := ftsQuery(strings.Trim(strings.TrimSpace(q), `"`))
+	if !strings.Contains(all, `" "`) {
+		return ""
+	}
+	return strings.ReplaceAll(all, `" "`, `" OR "`)
 }
 
 // Search finds stored text. The project filter is part of the query itself, applied before
@@ -140,7 +152,7 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (SearchResult, error
 	if p.Cursor != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(p.Cursor)
 		parts := strings.Split(string(raw), ":")
-		if err != nil || len(parts) != 3 || (parts[0] != "words" && parts[0] != "exact") {
+		if err != nil || len(parts) != 3 || (parts[0] != "words" && parts[0] != "exact" && parts[0] != "any") {
 			return SearchResult{}, ErrBadCursor
 		}
 		method = parts[0]
@@ -178,11 +190,15 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (SearchResult, error
 	run := func(m string) ([]Hit, error) {
 		var q string
 		var qa []any
-		if m == "words" {
+		if m == "words" || m == "any" {
 			q = `select e.id, e.project_id, e.trust_level, e.origin, e.observed_at, snippet(evidence_fts, 0, '**', '**', ' ... ', 18)
 				from evidence_fts join evidence e on e.seq = evidence_fts.rowid
 				where evidence_fts match ? and ` + cond + ` order by bm25(evidence_fts), e.seq desc limit ? offset ?`
-			qa = append([]any{ftsQuery(p.Query)}, args...)
+			match := ftsQuery(p.Query)
+			if m == "any" {
+				match = ftsAnyQuery(p.Query)
+			}
+			qa = append([]any{match}, args...)
 		} else {
 			needle := strings.Trim(strings.TrimSpace(p.Query), `"`)
 			q = `select e.id, e.project_id, e.trust_level, e.origin, e.observed_at, e.text
@@ -218,10 +234,21 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (SearchResult, error
 	if err != nil {
 		return SearchResult{}, err
 	}
+	// Nothing contains all the words: try the whole query as one literal string, and if that
+	// fails too, records that contain only some of the words. The result says which it was.
 	if len(hits) == 0 && method == "words" && p.Cursor == "" {
 		method = "exact"
 		if hits, err = run(method); err != nil {
 			return SearchResult{}, err
+		}
+		if len(hits) == 0 && ftsAnyQuery(p.Query) != "" {
+			method = "any"
+			if hits, err = run(method); err != nil {
+				return SearchResult{}, err
+			}
+		}
+		if len(hits) == 0 {
+			method = "words"
 		}
 	}
 	res := SearchResult{Hits: hits, Method: method}

@@ -68,8 +68,12 @@ Usage:
   sessionkeep instruction list [--all] | show ID
   sessionkeep instruction supersede ID "TEXT" [--reason R] [--yes]
   sessionkeep instruction archive ID [--reason R] [--yes]
-  sessionkeep plugin write DIR        Generate the Claude Code plugin directory for this binary
+  sessionkeep plugin write DIR [--with-mcp]
+                                   Generate the Claude Code plugin directory for this binary;
+                                   --with-mcp also registers the optional MCP server
                                    (changes no Claude Code setting)
+  sessionkeep mcp                      Optional MCP server on stdin/stdout with read-only tools
+                                   (started by Claude Code, not by hand)
   sessionkeep ingest                   Move captured events from the spool into the database
   sessionkeep status                   What is stored and what is still waiting (reads only)
   sessionkeep hook EVENT              Claude Code hook entry point (reads the hook JSON on stdin;
@@ -158,13 +162,23 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 }
 
 // parse separates positionals from flags. Value flags accept "--name value" and "--name=value".
-func parse(args []string, valueFlags ...string) (invocation, error) {
-	inv := invocation{flags: map[string]string{}}
+func parse(args []string, valueFlags ...string) (inv invocation, err error) {
+	inv = invocation{flags: map[string]string{}}
+	// A bare "--" ends the options: everything after it is taken literally, so text that happens
+	// to start with "--" (a search query, an instruction) can never be read as an option.
+	literal := []string(nil)
+	for i, a := range args {
+		if a == "--" {
+			args, literal = args[:i], args[i+1:]
+			break
+		}
+	}
 	for _, a := range args {
 		if a == "--json" {
 			inv.json = true
 		}
 	}
+	defer func() { inv.pos = append(inv.pos, literal...) }()
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "--json" {
@@ -175,7 +189,7 @@ func parse(args []string, valueFlags ...string) (invocation, error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -292,9 +306,20 @@ func dispatch(inv invocation) error {
 		return remember(inv, rest)
 	case "instruction":
 		return instructionCmd(inv, rest)
+	case "mcp":
+		if len(rest) != 0 {
+			return usageErr("usage: sessionkeep mcp [--all-projects]")
+		}
+		if err := inv.only("all-projects"); err != nil {
+			return err
+		}
+		return serveMCP(inv)
 	case "plugin":
-		if len(rest) != 2 || rest[0] != "write" || len(inv.flags) != 0 {
-			return usageErr("usage: sessionkeep plugin write DIR")
+		if len(rest) != 2 || rest[0] != "write" {
+			return usageErr("usage: sessionkeep plugin write DIR [--with-mcp]")
+		}
+		if err := inv.only("with-mcp"); err != nil {
+			return err
 		}
 		return pluginWrite(inv, rest[1])
 	case "exclude":
@@ -997,6 +1022,9 @@ func memoryCmd(inv invocation, cmd string, rest []string) error {
 		}
 		fmt.Fprintf(&b, "%s  %s\n", line, strings.Join(strings.Fields(h.Snippet), " "))
 	}
+	if res.Method == "any" {
+		b.WriteString("PARTIAL MATCHES ONLY: no stored record contains all of these words; the records above contain some of them.\n")
+	}
 	switch {
 	case len(res.Hits) == 0:
 		fmt.Fprintf(&b, "not found: nothing stored in %s matches this query\n", scope)
@@ -1296,7 +1324,7 @@ func pluginWrite(inv invocation, dir string) error {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	if err := plugin.Write(abs, exe, buildinfo.Get().Version); err != nil {
+	if err := plugin.Write(abs, exe, buildinfo.Get().Version, inv.flags["with-mcp"] != ""); err != nil {
 		if errors.Is(err, plugin.ErrNotOurs) {
 			return failErr("not_a_sessionkeep_plugin_dir", "%v; choose an empty or new directory", err)
 		}

@@ -10,7 +10,7 @@ import (
 func TestSkillsNameThisBinaryAndKeepTheSafetyRules(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "p")
 	exe := self(t)
-	if err := Write(dir, exe, "1"); err != nil {
+	if err := Write(dir, exe, "1", false); err != nil {
 		t.Fatal(err)
 	}
 	quoted := `"` + filepath.ToSlash(exe) + `"`
@@ -35,5 +35,30 @@ func TestSkillsNameThisBinaryAndKeepTheSafetyRules(t *testing.T) {
 				t.Errorf("%s: skill text lacks %q", name, m)
 			}
 		}
+	}
+}
+
+func TestMCPDeclarationIsOptional(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "p")
+	exe := self(t)
+	if err := Write(dir, exe, "1", false); err != nil {
+		t.Fatal(err)
+	}
+	mcpFile := filepath.Join(dir, ".mcp.json")
+	if _, err := os.Stat(mcpFile); err == nil {
+		t.Fatal("the MCP server must not be declared unless asked for")
+	}
+	if err := Write(dir, exe, "1", true); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(mcpFile)
+	if err != nil || !strings.Contains(string(raw), `"mcp"`) || !strings.Contains(string(raw), `"sessionkeep"`) {
+		t.Fatalf(".mcp.json: %s %v", raw, err)
+	}
+	if err := Write(dir, exe, "1", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(mcpFile); err == nil {
+		t.Fatal("regenerating without the option must remove the declaration")
 	}
 }

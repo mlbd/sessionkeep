@@ -125,6 +125,15 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D54 | If a slice meets something outside these answers, record it, take the safer option, and continue with the rest | Agreed way of working for this run |
 | D55 | Checkpoints are a note plus Git state (branch, commit, fingerprint of uncommitted and untracked content); no task or plan objects yet | Scope of slice 1A-9 |
 
+## Session 10 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D56 | MCP server uses the official Go SDK v1.8.0, is read-only (four tools), optional (`plugin write --with-mcp`), and answers only for the session's project unless the owner starts it with `--all-projects` | Implements ADR-0003 item 4; a model must not be able to widen its own scope |
+| D57 | `--` ends option parsing on the command line; all model-supplied text is passed after it | Closes an option-injection path found while designing the MCP tools |
+| D58 | Full-text index rebuilt with word stemming (migration 0004); when no record has all the words, a labelled partial-match fallback is returned | Forced by a live session in which a correctly stored fact was not found (`evidence/phase-1/1B-1.md`) |
+| D59 | Plan tools `instructions_get` and `checkpoint_get` are merged into `resume_pack` | Internal simplification |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.
