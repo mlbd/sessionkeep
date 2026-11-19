@@ -368,3 +368,46 @@ func TestAutoAddEndToEndThroughTheCommands(t *testing.T) {
 		t.Fatalf("project list: %q", out)
 	}
 }
+
+func TestQuietIngestIsSilentAndNeverCreatesTheDataDirectory(t *testing.T) {
+	sb := newSandbox(t)
+	if code, out, errOut := sb.run("ingest", "--quiet"); code != ExitOK || out != "" || errOut != "" {
+		t.Fatalf("before setup: %d %q %q", code, out, errOut)
+	}
+	if _, err := os.Stat(sb.env[config.EnvDataDir]); err == nil {
+		t.Fatal("`ingest --quiet` created the data directory")
+	}
+	app := sb.dir("app")
+	sb.ok("project", "add", app, "--capture", "conversation")
+	prompt, _ := json.Marshal(map[string]string{"session_id": "s-1", "cwd": app, "hook_event_name": "UserPromptSubmit", "prompt": "note"})
+	sb.hook("UserPromptSubmit", string(prompt))
+	if code, out, errOut := sb.run("ingest", "--quiet"); code != ExitOK || out != "" || errOut != "" {
+		t.Fatalf("quiet drain: %d %q %q", code, out, errOut)
+	}
+	if out := sb.ok("status"); !strings.Contains(out, "1 event(s)") || !strings.Contains(out, "waiting in the spool: 0") {
+		t.Fatalf("the quiet drain should have stored the event: %q", out)
+	}
+}
+
+func TestPluginWriteCommand(t *testing.T) {
+	sb := newSandbox(t)
+	dir := filepath.Join(sb.work, "plugin out")
+	out := sb.ok("plugin", "write", dir)
+	if !strings.Contains(out, "no Claude Code setting was changed") {
+		t.Fatalf("output: %q", out)
+	}
+	for _, f := range []string{filepath.Join(".claude-plugin", "plugin.json"), filepath.Join("hooks", "hooks.json")} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("%s not written: %v", f, err)
+		}
+	}
+	sb.ok("plugin", "write", dir) // refresh
+	if code, _, _ := sb.run("plugin", "write", sb.work); code != ExitFailure {
+		t.Fatalf("writing into a foreign non-empty directory: exit=%d, want failure", code)
+	}
+	for _, args := range [][]string{{"plugin"}, {"plugin", "write"}, {"plugin", "install", dir}} {
+		if code, _, _ := sb.run(args...); code != ExitUsage {
+			t.Errorf("%v: exit=%d, want usage", args, code)
+		}
+	}
+}

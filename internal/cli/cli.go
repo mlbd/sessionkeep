@@ -19,6 +19,7 @@ import (
 	"sessionkeep/internal/config"
 	"sessionkeep/internal/ingest"
 	"sessionkeep/internal/lease"
+	"sessionkeep/internal/plugin"
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/store"
 )
@@ -48,6 +49,8 @@ Usage:
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
+  sessionkeep plugin write DIR         Generate the Claude Code plugin directory for this binary
+                                   (changes no Claude Code setting)
   sessionkeep ingest                   Move captured events from the spool into the database
   sessionkeep status                   What is stored and what is still waiting (reads only)
   sessionkeep hook EVENT              Claude Code hook entry point (reads the hook JSON on stdin;
@@ -101,6 +104,17 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	}
 	if args[0] == "hook" {
 		return hook(args[1:], stdin, stdout, getenv)
+	}
+	if len(args) == 2 && args[0] == "ingest" && args[1] == "--quiet" {
+		// The form the plugin's background hook uses: print nothing and never report failure to
+		// the host. A held lease simply means another drain is already doing the work.
+		if inv, err := parse([]string{"ingest"}); err == nil {
+			inv.stdout, inv.getenv = io.Discard, getenv
+			if _, statErr := os.Stat(dataDirOf(getenv)); statErr == nil { // never create the data directory from a hook
+				ingestCmd(inv)
+			}
+		}
+		return ExitOK
 	}
 	inv, err := parse(args, "auto-add", "level", "capture", "name")
 	if err == nil {
@@ -241,6 +255,11 @@ func dispatch(inv invocation) error {
 			return usageErr("status takes no arguments")
 		}
 		return status(inv)
+	case "plugin":
+		if len(rest) != 2 || rest[0] != "write" || len(inv.flags) != 0 {
+			return usageErr("usage: sessionkeep plugin write DIR")
+		}
+		return pluginWrite(inv, rest[1])
 	case "exclude":
 		return exclude(inv, rest)
 	case "project":
@@ -650,6 +669,39 @@ func projectCmd(inv invocation, rest []string) error {
 		return inv.emit(after, fmt.Sprintf("project %.8s: %s\n", after.ID, state))
 	}
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
+}
+
+// dataDirOf returns the resolved data directory, or a path that cannot exist.
+func dataDirOf(getenv func(string) string) string {
+	p, err := config.Resolve(runtime.GOOS, getenv)
+	if err != nil {
+		return string([]byte{0})
+	}
+	return p.DataDir
+}
+
+// pluginWrite generates the Claude Code plugin directory for this binary. It changes no Claude
+// Code setting: loading the plugin (`claude --plugin-dir DIR`, or installing it) is the user's step.
+func pluginWrite(inv invocation, dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return usageErr("cannot resolve path %q: %v", dir, err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find this program's own path: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	if err := plugin.Write(abs, exe, buildinfo.Get().Version); err != nil {
+		if errors.Is(err, plugin.ErrNotOurs) {
+			return failErr("not_a_sessionkeep_plugin_dir", "%v; choose an empty or new directory", err)
+		}
+		return err
+	}
+	text := fmt.Sprintf("plugin written to %s\nhooks call: %s\nto try it for one session: claude --plugin-dir \"%s\"\nno Claude Code setting was changed\n", abs, exe, abs)
+	return inv.emit(map[string]string{"plugin_dir": abs, "binary": exe}, text)
 }
 
 // ingestCmd drains the spool into the database once. With no engine running this is how captured

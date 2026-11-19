@@ -82,6 +82,14 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D36 | Only exclusions discard already-spooled events. Pausing a project or setting it to `off` stops new capture, but events spooled before that are still ingested | Provisional; the owner may prefer pause to discard as well |
 | D37 | `sessionkeep status` (read-only counts and spool backlog) and `sessionkeep ingest` (one drain) added | Internal |
 
+## Session 6 additions (2026-11-19)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D36 | Pause and `off` keep already-spooled events; only exclusions discard them | **Confirmed by owner 2026-11-19** ("keep pause as is") |
+| D38 | Without an engine, drains are started by asynchronous plugin hook entries after `SessionStart` and `Stop` (plus `sessionkeep ingest` by hand). Extends the manual-mode answer the owner accepted for ADR-0003 | Implemented and observed live; **owner to confirm**, since the earlier approval said drains happen only when the user or a skill runs one |
+| D39 | The plugin directory is generated per installation (`sessionkeep plugin write DIR`) and embeds the binary's absolute path; SessionKeep does not edit any Claude Code setting | Internal; follows ADR-0002 |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.
