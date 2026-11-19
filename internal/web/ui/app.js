@@ -112,6 +112,7 @@ async function projectsView() {
   const [pr, set] = await Promise.all([loadProjects(), api('GET', '/api/settings')]);
   if (!pr.ok) return say(problem(pr), 'bad');
 
+  const removal = el('div', { 'aria-live': 'polite' });
   const rows = projects.map(p => {
     const level = select(`level-${p.id}`, LEVELS, p.capture_level);
     level.setAttribute('aria-label', `Capture level for ${p.name}`);
@@ -122,11 +123,13 @@ async function projectsView() {
       el('span', { class: 'text', text: p.roots.join('\n') }),
       el('div', { class: 'row' }, level,
         el('button', { type: 'button', text: 'Set level', onclick: () => act(`/api/projects/${p.id}/capture`, { level: level.value }, 'Level changed.') }),
-        el('button', { type: 'button', text: p.paused ? 'Resume' : 'Pause', onclick: () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Resumed.' : 'Paused.') })),
+        el('button', { type: 'button', text: p.paused ? 'Resume' : 'Pause', onclick: () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Resumed.' : 'Paused.') }),
+        el('button', { type: 'button', text: 'Delete captured text...', 'aria-label': `Delete captured text of ${p.name}`, onclick: () => forget({ kind: 'captured', project: p.id }, removal, () => show('projects')) }),
+        el('button', { type: 'button', text: 'Delete project...', 'aria-label': `Delete project ${p.name}`, onclick: () => forget({ kind: 'project', project: p.id }, removal, () => show('projects')) })),
     ];
   });
   view.append(el('h2', { text: 'Registered projects' }),
-    projects.length ? table(['Name', 'State', 'Added', 'Folder', 'Change'], rows) : el('p', { text: 'No projects registered yet. Nothing is being saved.' }));
+    projects.length ? table(['Name', 'State', 'Added', 'Folder', 'Change'], rows) : el('p', { text: 'No projects registered yet. Nothing is being saved.' }), removal);
 
   const path = el('input', { type: 'text', id: 'add-path', required: true, autocomplete: 'off' });
   const level = select('add-level', [['', 'choose what to save...'], ...LEVELS], '');
@@ -161,6 +164,26 @@ async function act(path, body, done) {
   const r = await api('POST', path, body);
   if (r.ok) { await show(current); say(done, 'ok'); } else say(problem(r), 'bad');
   return r;
+}
+
+// Deletion always shows what would be removed first; nothing is deleted until confirmed.
+async function forget(body, into, after) {
+  const r = await api('POST', '/api/forget', body);
+  if (r.status !== 409 || !r.data || r.data.deleted !== false) return say(problem(r), 'bad');
+  const w = r.data.would_remove;
+  say('Not deleted yet. Check what would be removed, then confirm.');
+  into.replaceChildren(el('div', { class: 'preview' },
+    el('p', { class: 'state-bad', text: 'This would permanently delete: ' + r.data.target }),
+    el('p', { text: `That is ${w.events} event(s), ${w.text_records} text record(s), ${w.sessions} session(s), ${w.instructions} instruction(s), ${w.checkpoints} checkpoint(s), ${w.projects} project(s). It cannot be undone. Exports you made earlier and Claude Code's own session files are not affected.` }),
+    el('div', { class: 'row' },
+      el('button', { type: 'button', class: 'primary', text: 'Confirm: delete permanently', onclick: async () => {
+        const done = await api('POST', '/api/forget', { ...body, confirm: true });
+        if (!done.ok) return say(problem(done), 'bad');
+        await after();
+        say('Deleted.', 'ok');
+      } }),
+      el('button', { type: 'button', text: 'Cancel', onclick: () => { into.replaceChildren(); say(''); } }))));
+  into.querySelector('button').focus();
 }
 
 // ---- Search ---------------------------------------------------------------------------------
@@ -198,7 +221,8 @@ async function searchView() {
           const x = one.data;
           detail.replaceChildren(el('div', { class: 'panel' },
             el('p', { class: 'muted', text: `Project ${x.project_name}. Said by ${x.who} (${x.origin}) at ${x.observed_at}. Session ${x.session_id || 'unknown'}. ${x.completeness}; ${x.redactions} redaction(s).` }),
-            el('pre', { text: x.text })));
+            el('pre', { text: x.text }),
+            el('button', { type: 'button', text: 'Delete this record...', onclick: () => forget({ kind: 'record', id: x.id, project: x.project_id }, detail, () => run('')) })));
         } }), detail));
     }
     if (d.next_cursor) results.append(el('button', { type: 'button', text: 'More results', onclick: e => { e.target.remove(); run(d.next_cursor); } }));

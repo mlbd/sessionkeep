@@ -380,6 +380,33 @@ func TestDashboardJourneyThroughTheAPI(t *testing.T) {
 		t.Fatalf("archived instruction still injected: %q", ctx)
 	}
 
+	// Deletion through the API: preview first, then confirm; gone from search afterwards.
+	b.do("GET", "/api/search?q=ISO&project="+pid+"&who=assistant", nil, nil, &found)
+	victim := found.Data.Hits[0].ID
+	var del struct {
+		Data struct {
+			Deleted     bool
+			WouldRemove struct {
+				TextRecords int `json:"text_records"`
+			} `json:"would_remove"`
+		}
+	}
+	if code := b.do("POST", "/api/forget", map[string]any{"kind": "record", "id": victim, "project": pid}, nil, &del); code != http.StatusConflict || del.Data.Deleted || del.Data.WouldRemove.TextRecords != 1 {
+		t.Fatalf("forget preview: %d %+v", code, del.Data)
+	}
+	if code := b.do("GET", "/api/records/"+victim+"?project="+pid, nil, nil, nil); code != 200 {
+		t.Fatal("the preview deleted the record")
+	}
+	if code := b.do("POST", "/api/forget", map[string]any{"kind": "record", "id": victim, "project": pid, "confirm": true}, nil, nil); code != 200 {
+		t.Fatalf("forget: %d", code)
+	}
+	if code := b.do("GET", "/api/records/"+victim+"?project="+pid, nil, nil, nil); code != http.StatusUnprocessableEntity {
+		t.Fatalf("deleted record still readable: %d", code)
+	}
+	if code := b.do("POST", "/api/forget", map[string]any{"kind": "everything", "confirm": true}, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("unknown forget kind: %d", code)
+	}
+
 	// Checkpoint and resume; pause.
 	if code := b.do("POST", "/api/checkpoints", map[string]string{"note": "Export done. Next: tests.", "project": pid}, nil, nil); code != 200 {
 		t.Fatalf("checkpoint: %d", code)
@@ -390,7 +417,7 @@ func TestDashboardJourneyThroughTheAPI(t *testing.T) {
 			Recent      []struct{ Text string }
 		}
 	}
-	if code := b.do("GET", "/api/resume?project="+pid, nil, nil, &res); code != 200 || res.Data.Checkpoints[0].Note != "Export done. Next: tests." || len(res.Data.Recent) != 2 {
+	if code := b.do("GET", "/api/resume?project="+pid, nil, nil, &res); code != 200 || res.Data.Checkpoints[0].Note != "Export done. Next: tests." || len(res.Data.Recent) != 1 {
 		t.Fatalf("resume: %d %+v", code, res.Data)
 	}
 	if code := b.do("POST", "/api/projects/"+pid+"/pause", map[string]string{}, nil, nil); code != 200 {

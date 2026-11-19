@@ -272,3 +272,13 @@ func PruneSessionState(p config.Paths, now time.Time) {
 		}
 	}
 }
+
+// RemoveCache deletes the cache files of a project that no longer exists.
+func RemoveCache(p config.Paths, projectID string) {
+	if projectID == "" {
+		return
+	}
+	path := cachePath(p, projectID)
+	os.Remove(path)
+	os.Remove(path + fsx.AltSuffix)
+}

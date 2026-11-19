@@ -141,6 +141,14 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D60 | [ADR-0008](docs/adr/ADR-0008-dashboard-without-a-build-step.md): the Phase 1 dashboard is three plain embedded files with no npm packages or build step; the API only relays `sessionkeep` commands; loopback bind, one-time sign-in link, Host/Origin checks, request token | **Proposed, built, awaiting owner.** Departs from the React/Vite/Tailwind candidates the owner had approved downloading; chosen as the safer option under D54 because the UI could not be browser-verified in this run |
 | D61 | `sessionkeep dashboard` never opens a browser by itself | Internal; follows the owner's no-browser-automation rule |
 
+## Session 12 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D62 | Export is one unencrypted zip (database copy, settings, manifest with digests); import verifies everything and restores only into a data directory with no database; no merge | Phase 1 scope; encryption and cross-device restore are Phase 7 |
+| D63 | Deletion (`forget`) previews, then deletes, drops matching spooled events, rebuilds the search index and rewrites the database file; an audit row keeps counts only | Implements the deletion rules in `docs/01-DATA_MODEL.md` §5 |
+| D64 | The database copy for export is taken with `VACUUM INTO` on the writer connection under the lease | Follows finding B1 (a separate-connection backup restarts under write load) |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

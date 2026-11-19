@@ -198,6 +198,41 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.command(w, "checkpoint", flag("project", in.Project), "--", in.Note)
 	})
 
+	// Deletion. Without "confirm": true the answer is 409 with exactly what would be removed.
+	mux.HandleFunc("POST /api/forget", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Kind    string `json:"kind"` // record | captured | project
+			ID      string `json:"id"`
+			Project string `json:"project"`
+			Confirm bool   `json:"confirm"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		var args []string
+		switch in.Kind {
+		case "record":
+			args = []string{"forget", "record", flag("project", in.Project)}
+		case "captured":
+			args = []string{"forget", "captured", flag("project", in.Project)}
+		case "project":
+			args = []string{"forget", "project"}
+		default:
+			fail(w, http.StatusBadRequest, "usage", "kind must be record, captured or project")
+			return
+		}
+		if in.Confirm {
+			args = append(args, "--yes")
+		}
+		switch in.Kind {
+		case "record":
+			args = append(args, "--", in.ID)
+		case "project":
+			args = append(args, "--", in.Project)
+		}
+		s.command(w, args...)
+	})
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})

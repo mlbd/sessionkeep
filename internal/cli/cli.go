@@ -72,6 +72,11 @@ Usage:
                                    Generate the Claude Code plugin directory for this binary;
                                    --with-mcp also registers the optional MCP server
                                    (changes no Claude Code setting)
+  sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
+  sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
+  sessionkeep forget record ID | captured --project P | project P   [--yes]
+                                   Permanently delete stored data; without --yes it only shows
+                                   what would be deleted
   sessionkeep dashboard                Serve the local web pages (this computer only) and print a
                                    one-time sign-in link; runs until you press Ctrl+C
   sessionkeep mcp                      Optional MCP server on stdin/stdout with read-only tools
@@ -191,7 +196,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -308,6 +313,12 @@ func dispatch(inv invocation) error {
 		return remember(inv, rest)
 	case "instruction":
 		return instructionCmd(inv, rest)
+	case "export":
+		return exportCmd(inv, rest)
+	case "import":
+		return importCmd(inv, rest)
+	case "forget":
+		return forgetCmd(inv, rest)
 	case "dashboard":
 		if len(rest) != 0 || len(inv.flags) != 0 {
 			return usageErr("usage: sessionkeep dashboard")
