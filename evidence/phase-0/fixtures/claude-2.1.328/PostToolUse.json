@@ -1,0 +1,27 @@
+{
+ "session_id": "<UUID>",
+ "transcript_path": "C:\\Users\\<USER>\\<CLAUDE_CONFIG_DIR>\\projects\\<ENCODED_PROJECT_DIR>\\<UUID>.jsonl",
+ "cwd": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é",
+ "prompt_id": "<UUID>",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Read",
+ "tool_input": {
+  "file_path": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é\\note.txt"
+ },
+ "tool_response": {
+  "type": "text",
+  "file": {
+   "filePath": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é\\note.txt",
+   "content": "The word in this file is LANTERN.\n",
+   "numLines": 2,
+   "startLine": 1,
+   "totalLines": 2
+  }
+ },
+ "tool_use_id": "toolu_012fCH5kKRkJPxXkBgFkS3UD",
+ "duration_ms": 37
+}

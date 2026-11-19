@@ -1,0 +1,8 @@
+{"type":"object","additionalProperties":false,"required":["verdict","summary","findings","sandbox_probe"],
+ "properties":{"verdict":{"type":"string","enum":["needs_attention","no_material_findings","incomplete"]},
+  "summary":{"type":"string"},
+  "findings":{"type":"array","items":{"type":"object","additionalProperties":false,
+    "required":["severity","title","path","line_start","requirement_ids","classification"],
+    "properties":{"severity":{"type":"string","enum":["critical","high","medium","low","info"]},"title":{"type":"string"},"path":{"type":"string"},"line_start":{"type":"integer"},"requirement_ids":{"type":"array","items":{"type":"string"}},"classification":{"type":"string","enum":["observed","inferred"]}}}},
+  "sandbox_probe":{"type":"object","additionalProperties":false,"required":["write_attempt_outcome","network_attempt_outcome"],
+    "properties":{"write_attempt_outcome":{"type":"string"},"network_attempt_outcome":{"type":"string"}}}}}

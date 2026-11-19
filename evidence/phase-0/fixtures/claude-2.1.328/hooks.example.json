@@ -1,0 +1,109 @@
+{
+ "hooks": {
+  "SessionStart": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "SessionStart"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "UserPromptSubmit": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "UserPromptSubmit"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "PostToolUse": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "PostToolUse"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "PostToolUseFailure": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "PostToolUseFailure"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "Stop": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "Stop"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "StopFailure": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "StopFailure"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ],
+  "SessionEnd": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "${CLAUDE_PLUGIN_ROOT}/tools/recorder.exe",
+      "args": [
+       "<OUT_DIR>",
+       "SessionEnd"
+      ],
+      "timeout": 10
+     }
+    ]
+   }
+  ]
+ }
+}

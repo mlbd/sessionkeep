@@ -1,0 +1,15 @@
+{
+ "session_id": "<UUID>",
+ "transcript_path": "C:\\Users\\<USER>\\<CLAUDE_CONFIG_DIR>\\projects\\<ENCODED_PROJECT_DIR>\\<UUID>.jsonl",
+ "cwd": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é",
+ "prompt_id": "<UUID>",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "Stop",
+ "stop_hook_active": false,
+ "last_assistant_message": "ZEBRA-4471, HERON-9026, LANTERN",
+ "background_tasks": [],
+ "session_crons": []
+}

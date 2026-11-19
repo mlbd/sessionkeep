@@ -1,0 +1,9 @@
+{
+ "session_id": "<UUID>",
+ "transcript_path": "C:\\Users\\<USER>\\<CLAUDE_CONFIG_DIR>\\projects\\<ENCODED_PROJECT_DIR>\\<UUID>.jsonl",
+ "cwd": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é",
+ "prompt_id": "<UUID>",
+ "permission_mode": "default",
+ "hook_event_name": "UserPromptSubmit",
+ "prompt": "Read the file note.txt in the current directory. Then reply with exactly three items separated by commas and nothing else: the first project codeword and the second project codeword that were recorded in your context, and the word in note.txt. If you cannot find one, write MISSING for it."
+}

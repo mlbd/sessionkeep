@@ -1,0 +1,18 @@
+# ADR-0003 — Process model: lease-based ingester, no required daemon
+
+- Date / owner / status: 2026-11-19 / project owner / **accepted** by owner 2026-11-19 (limits listed below still apply)
+- Requirement IDs and affected phase: R01, R02, R22; D03, D08; Phase 1 (P1-04, P1-05, P1-07, P1-12)
+- Decision and constraints:
+  1. **Writers are whoever holds the ingest lease.** One OS-level exclusive lock file in the data directory. The holder is the only process that writes to SQLite. Hooks never take it and never write to the database.
+  2. **Three possible holders, in priority order:** the optional engine (`sessionkeep start` or OS supervisor); otherwise a `sessionkeep mcp` process, if the MCP server is enabled; otherwise a bounded `sessionkeep ingest --drain` run by the user or by a skill. Hooks never start it. A holder that sees a higher-priority holder waiting releases the lease after its current transaction.
+  3. **Hooks read through a cache first.** The lease holder writes an atomically replaced instruction/checkpoint cache per project (version, digest, written-at). Hooks read the cache; if it is absent they open the database read-only with a 20 ms busy timeout; if that fails they emit a "degraded, no stored context available" line and exit 0.
+  4. **MCP is stated honestly as resident.** A stdio MCP server lives for the session. It is optional, off until the owner enables it, and its memory is counted per session in the resource report. Phase 1 recall works without it through skills that call the CLI.
+  5. **Supervisor is not part of the first slice.** Task Scheduler/launchd/systemd integration moves to the end of Phase 1 and stays opt-in.
+- Evidence: Spec conflict items 1–2 in `evidence/phase-0/README.md` §7; SQLite WAL page (one writer; readers need write access to `-shm` or its directory); measured commit and spool costs in §6. The MCP lifetime statement is based on how Claude Code runs stdio servers and was not measured in this session.
+- Alternatives and reasons for rejecting them: Mandatory daemon (the reliability problem the owner is leaving behind). Hooks writing directly to SQLite (every hook becomes a writer; 20 concurrent sessions contend on one write lock inside a 100 ms budget, and migrations would have to be safe in the hook path). Daemon started by hooks on demand (explicitly forbidden by the project rules).
+- Quality, durability, resource and compatibility implications: With no engine and no MCP, new events sit in the spool until the next drain; recall of very recent turns can lag and must be labelled with the cache timestamp. Lease hand-off needs crash tests (holder killed mid-transaction, stale lock after power loss).
+- Security, privacy, licensing and cost implications: Lock and cache files are created with user-only ACLs. No network listener is needed for capture or recall.
+- Migration / rollout / rollback / degradation plan: Migrations run only in the lease holder under an additional exclusive upgrade lock; hooks keep using the cache during upgrade.
+- Known limitations, open questions and next review trigger: Windows lock primitive (LockFileEx on a held handle vs named mutex) to be chosen in the Go spike. With no engine and no MCP, drains happen only when the user or a skill runs one; whether that is acceptable as the manual-mode default is an owner choice.
+- Update 2026-11-19 (session 2): `LockFileEx` on a lease file excluded a second consumer and was released by the OS after a hard kill; 1000 events survived 29 injected crashes exactly once. Evidence §9.2. The Windows lock primitive question is answered for process crashes.
+- Approval / supersedes: approved by owner 2026-11-19; amends ARCHITECTURE §1 and §4.

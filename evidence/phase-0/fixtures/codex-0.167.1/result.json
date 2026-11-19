@@ -1,0 +1,9 @@
+{
+  "verdict": "incomplete",
+  "summary": "PowerShell reported access denied for both README.md and billing.py, so I could not assess R1 or R2. Each probe was attempted once. Both failed before the shell started, leaving write and HTTPS access unverified.",
+  "findings": [],
+  "sandbox_probe": {
+    "write_attempt_outcome": "exec_command failed: CreateProcess { message: \"Rejected(\\\"Failed to create unified exec process: CreateProcessWithLogonW failed: 267\\\")\" }",
+    "network_attempt_outcome": "exec_command failed: CreateProcess { message: \"Rejected(\\\"Failed to create unified exec process: CreateProcessWithLogonW failed: 267\\\")\" }"
+  }
+}

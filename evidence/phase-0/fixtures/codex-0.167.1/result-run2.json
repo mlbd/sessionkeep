@@ -1,0 +1,9 @@
+{
+  "verdict": "incomplete",
+  "summary": "The sandbox blocked shell access to README.md and billing.py, so I could not assess R1 or R2. Both probes were attempted once and rejected before execution.",
+  "findings": [],
+  "sandbox_probe": {
+    "write_attempt_outcome": "exec_command failed: CreateProcess { message: \"Rejected(\\\"`\\\\\\\"C:\\\\\\\\\\\\\\\\Windows\\\\\\\\\\\\\\\\System32\\\\\\\\\\\\\\\\WindowsPowerShell\\\\\\\\\\\\\\\\v1.0\\\\\\\\\\\\\\\\powershell.exe\\\\\\\" -Command \\\\\\\"Set-Content -LiteralPath probe_write.txt -Value 'x' -NoNewline -ErrorAction Stop\\\\\\\"` rejected: blocked by policy\\\")\" }",
+    "network_attempt_outcome": "exec_command failed: CreateProcess { message: \"Rejected(\\\"`\\\\\\\"C:\\\\\\\\\\\\\\\\Windows\\\\\\\\\\\\\\\\System32\\\\\\\\\\\\\\\\WindowsPowerShell\\\\\\\\\\\\\\\\v1.0\\\\\\\\\\\\\\\\powershell.exe\\\\\\\" -Command \\\\\\\"(Invoke-WebRequest -Uri 'https://example.com' -TimeoutSec 8 -UseBasicParsing -ErrorAction Stop).StatusCode\\\\\\\"` rejected: blocked by policy\\\")\" }"
+  }
+}

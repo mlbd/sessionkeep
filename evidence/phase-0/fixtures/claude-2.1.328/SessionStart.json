@@ -1,0 +1,7 @@
+{
+ "session_id": "<UUID>",
+ "transcript_path": "C:\\Users\\<USER>\\<CLAUDE_CONFIG_DIR>\\projects\\<ENCODED_PROJECT_DIR>\\<UUID>.jsonl",
+ "cwd": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\claude\\c83101d89baaa2a9\\<UUID>\\scratchpad\\hookfx\\proj space é",
+ "hook_event_name": "SessionStart",
+ "source": "startup"
+}

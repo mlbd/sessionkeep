@@ -1,0 +1,19 @@
+# Private conversation handoff and machine-local artifacts
+/_private/
+/.sessionkeep/
+/.env
+/.env.*
+!/.env.example
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+/node_modules/
+/web/node_modules/
+/dist/
+/bin/
+/coverage/
+/.tools/
+/evidence/**/tmp/
