@@ -73,6 +73,15 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D32 | Hook deadline 2 s instead of 60 ms; spool events keyed by generated id; strict field allowlist; `systemMessage` reminder in ask mode (ADR-0002 update) | Internal, reversible; recorded with measurements in `evidence/phase-1/1A-4.md` |
 | D33 | Redaction rule set gained command-line credential rules after a test caught `curl -u user:pass` reaching the spool | Done in slice 1A-4 |
 
+## Session 5 additions (2026-11-19)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D34 | Migration `0001_foundation` was edited in place: `sessions` is unique per (project, agent, device, external session) so one host session can span projects | Done before any database existed outside test sandboxes. **From slice 1A-6 on (first run against real data) applied migrations are never edited; changes go in new numbered files** |
+| D35 | Atomic file replacement on Windows uses a POSIX-semantics rename (needs Windows 10 1709+), classic rename as fallback; files replaced this way are read through `fsx.ReadFile` | Internal; forced by a failing test (`evidence/phase-1/1A-5.md`) |
+| D36 | Only exclusions discard already-spooled events. Pausing a project or setting it to `off` stops new capture, but events spooled before that are still ingested | Provisional; the owner may prefer pause to discard as well |
+| D37 | `sessionkeep status` (read-only counts and spool backlog) and `sessionkeep ingest` (one drain) added | Internal |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

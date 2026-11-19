@@ -38,7 +38,7 @@ CREATE TABLE sessions (
   ended_at            TEXT,
   state               TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','ended','interrupted')),
   adapter_version     INTEGER NOT NULL,
-  UNIQUE (agent, device_id, external_session_id),
+  UNIQUE (project_id, agent, device_id, external_session_id),   -- one host session can move between projects
   UNIQUE (project_id, id)
 ) STRICT;
 CREATE INDEX sessions_project_time ON sessions(project_id, started_at);

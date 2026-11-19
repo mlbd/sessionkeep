@@ -47,6 +47,11 @@ else
   echo "NOT RUN: the race detector needs cgo and a C compiler, which this machine does not have"
 fi
 
+step "cross-compile (compile only; not executed on these systems)"
+for t in linux/amd64 darwin/arm64 windows/arm64; do
+  if CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build ./... ; then echo "$t compiles"; else echo "FAIL: $t does not compile"; fail=1; fi
+done
+
 step "build (CGO-free) and smoke"
 mkdir -p bin
 CGO_ENABLED=0 go build -trimpath -o bin/sessionkeep.exe ./cmd/sessionkeep && ./bin/sessionkeep.exe version && ./bin/sessionkeep.exe doctor || fail=1

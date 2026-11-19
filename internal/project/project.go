@@ -217,6 +217,11 @@ func WriteRootsCache(p config.Paths, roots []Root, now time.Time) error {
 	if roots == nil {
 		roots = []Root{}
 	}
+	// Leave the file alone when nothing changed: hooks read it constantly, and every replace is a
+	// moment in which a reader can collide with the writer.
+	if current, err := ReadRootsCache(p); err == nil && current != nil && sameRoots(current, roots) {
+		return nil
+	}
 	raw, err := json.MarshalIndent(rootsFile{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), Roots: roots}, "", "  ")
 	if err != nil {
 		return err
@@ -227,7 +232,7 @@ func WriteRootsCache(p config.Paths, roots []Root, now time.Time) error {
 // ReadRootsCache returns the registered roots. A missing file means none are registered. A file
 // that cannot be parsed is an error: the caller must capture nothing rather than guess.
 func ReadRootsCache(p config.Paths) ([]Root, error) {
-	raw, err := os.ReadFile(p.RootsCachePath())
+	raw, err := fsx.ReadFile(p.RootsCachePath())
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -242,4 +247,31 @@ func ReadRootsCache(p config.Paths) ([]Root, error) {
 		return nil, fmt.Errorf("roots cache version %d is not supported", f.Version)
 	}
 	return f.Roots, nil
+}
+
+// Excluded reports whether dir is at or below one of the user's excluded folders. A path that
+// cannot be normalized counts as excluded: when in doubt, keep nothing.
+func Excluded(goos string, exclusions []string, dir string) bool {
+	p, err := Normalize(goos, dir)
+	if err != nil {
+		return true
+	}
+	for _, ex := range exclusions {
+		if within(goos, p, ex) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameRoots(a, b []Root) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

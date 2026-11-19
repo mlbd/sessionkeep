@@ -96,7 +96,7 @@ func sepOf(dir string) string {
 // parsed or validated is an error: callers on the capture path must then capture nothing,
 // because a damaged file might have held exclusions.
 func LoadSettings(p Paths) (Settings, error) {
-	raw, err := os.ReadFile(p.SettingsPath())
+	raw, err := fsx.ReadFile(p.SettingsPath())
 	if errors.Is(err, os.ErrNotExist) {
 		return DefaultSettings(), nil
 	}

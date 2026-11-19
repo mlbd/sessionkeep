@@ -17,6 +17,8 @@ import (
 	"sessionkeep/internal/buildinfo"
 	"sessionkeep/internal/capture"
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/ingest"
+	"sessionkeep/internal/lease"
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/store"
 )
@@ -31,7 +33,7 @@ const (
 	ExitNeedsConsent = 4
 )
 
-const usage = `sessionkeep — local-first developer memory (pre-release; events are captured to the spool but not yet ingested)
+const usage = `sessionkeep — local-first developer memory (pre-release; the Claude Code plugin is not built yet)
 
 Usage:
   sessionkeep setup [--auto-add manual|ask|auto] [--level LEVEL]
@@ -46,7 +48,9 @@ Usage:
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
-  sessionkeep hook EVENT               Claude Code hook entry point (reads the hook JSON on stdin;
+  sessionkeep ingest                   Move captured events from the spool into the database
+  sessionkeep status                   What is stored and what is still waiting (reads only)
+  sessionkeep hook EVENT              Claude Code hook entry point (reads the hook JSON on stdin;
                                    always exits 0; not meant to be run by hand)
   sessionkeep doctor                   Read-only checks: build, data location, SQLite engine gate
   sessionkeep paths                    Show where SessionKeep keeps its data (creates nothing)
@@ -227,6 +231,16 @@ func dispatch(inv invocation) error {
 			return usageErr("setup takes options only")
 		}
 		return setup(inv)
+	case "ingest":
+		if len(rest) != 0 || len(inv.flags) != 0 {
+			return usageErr("ingest takes no arguments")
+		}
+		return ingestCmd(inv)
+	case "status":
+		if len(rest) != 0 || len(inv.flags) != 0 {
+			return usageErr("status takes no arguments")
+		}
+		return status(inv)
 	case "exclude":
 		return exclude(inv, rest)
 	case "project":
@@ -326,10 +340,18 @@ func absNorm(p string) (string, error) {
 
 // withStore opens the database, runs fn, then rewrites the roots cache the hook path reads.
 //
-// Until the ingest lease exists (slice 1A-5) these short administrative writes rely on SQLite's
-// own locking; ADR-0003's "only the lease holder writes" is applied to them in that slice.
+// It holds the ingest lease for the duration (ADR-0003: only the lease holder writes), waiting
+// up to ten seconds if a drain is in progress.
 func withStore(st state, fn func(ctx context.Context, s *store.Store) error) error {
 	ctx := context.Background()
+	l, err := lease.AcquireWait(st.paths.LeasePath, 10*time.Second)
+	if errors.Is(err, lease.ErrHeld) {
+		return &cmdError{ExitUnavailable, "busy", "another SessionKeep process is writing the database; try again in a moment"}
+	}
+	if err != nil {
+		return fmt.Errorf("take the ingest lease: %w", err)
+	}
+	defer l.Release()
 	s, err := store.Open(ctx, st.paths.DBPath)
 	if err != nil {
 		if errors.Is(err, store.ErrIncompatibleEngine) {
@@ -630,6 +652,81 @@ func projectCmd(inv invocation, rest []string) error {
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
 }
 
+// ingestCmd drains the spool into the database once. With no engine running this is how captured
+// events become searchable (ADR-0003, manual mode).
+func ingestCmd(inv invocation) error {
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	l, err := lease.Acquire(st.paths.LeasePath)
+	if errors.Is(err, lease.ErrHeld) {
+		return &cmdError{ExitUnavailable, "busy", "another SessionKeep process is already ingesting; nothing to do here"}
+	}
+	if err != nil {
+		return fmt.Errorf("take the ingest lease: %w", err)
+	}
+	defer l.Release()
+	s, err := store.Open(ctx, st.paths.DBPath)
+	if err != nil {
+		if errors.Is(err, store.ErrIncompatibleEngine) {
+			return &cmdError{ExitUnavailable, "incompatible", err.Error()}
+		}
+		return err
+	}
+	defer s.Close()
+	rep, err := ingest.Drain(ctx, ingest.Deps{Paths: st.paths, Settings: st.settings, Store: s, GOOS: runtime.GOOS, Now: time.Now, NewID: config.NewID})
+	text := fmt.Sprintf("ingested %d, already stored %d, quarantined %d, discarded (excluded) %d, projects created %d, gaps imported %d\n",
+		rep.Ingested, rep.Replayed, rep.Quarantined, rep.DiscardedExclude, rep.ProjectsCreated, rep.GapsImported)
+	if err != nil {
+		inv.emit(rep, text)
+		return fmt.Errorf("drain stopped with %d file(s) left in the spool; they will be picked up by the next run: %w", rep.Remaining, err)
+	}
+	return inv.emit(rep, text)
+}
+
+// status reports what is stored and what is waiting, without taking the lease or changing anything.
+func status(inv invocation) error {
+	st, err := load(inv, false)
+	if err != nil {
+		return err
+	}
+	counts, err := store.ReadCounts(context.Background(), st.paths.DBPath)
+	if err != nil {
+		return fmt.Errorf("read the database: %w", err)
+	}
+	pending, quarantined, oldest := 0, 0, ""
+	if entries, err := os.ReadDir(st.paths.SpoolDir); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".evt") {
+				if pending == 0 {
+					if fi, err := e.Info(); err == nil {
+						oldest = fi.ModTime().UTC().Format(time.RFC3339)
+					}
+				}
+				pending++
+			}
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(st.paths.DataDir, ingest.QuarantineDir)); err == nil {
+		quarantined = len(entries)
+	}
+	unimported := 0
+	if raw, err := os.ReadFile(filepath.Join(st.paths.DataDir, capture.GapLogName)); err == nil {
+		unimported = strings.Count(string(raw), "\n")
+	}
+	data := map[string]any{"stored": counts, "spool_pending": pending, "spool_oldest": oldest, "quarantined_files": quarantined,
+		"gaps_not_yet_imported": unimported, "unregistered_folders": st.settings.AutoAdd.Mode}
+	text := fmt.Sprintf("stored: %d project(s), %d session(s), %d event(s), %d text record(s), %d capture gap(s)\n", counts.Projects, counts.Sessions, counts.Events, counts.Evidence, counts.Gaps)
+	text += fmt.Sprintf("waiting in the spool: %d event(s)", pending)
+	if pending > 0 {
+		text += fmt.Sprintf(" (oldest %s) — run `sessionkeep ingest` to store them", oldest)
+	}
+	text += fmt.Sprintf("\nquarantined files: %d; gaps not yet imported: %d\nunregistered folders: %s\n", quarantined, unimported, describeMode(st.settings.AutoAdd))
+	return inv.emit(data, text)
+}
+
 type check struct {
 	Name   string `json:"name"`
 	Status string `json:"status"` // ok | failed
@@ -637,7 +734,7 @@ type check struct {
 }
 
 // notChecked is stated in every doctor report so a short list of passes is not read as full health.
-const notChecked = "database file, spool, ingest lease, capture hooks, plugin registration"
+const notChecked = "database integrity, spool backlog age, capture hooks and plugin registration (see `sessionkeep status` for counts)"
 
 // doctor runs read-only checks. It opens no database file and creates nothing; later slices add
 // checks for the spool, lease, database and plugin registration as those parts are built.

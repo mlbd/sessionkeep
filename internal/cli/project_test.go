@@ -312,3 +312,59 @@ func TestHookCommandCapturesOnlyForRegisteredProjectsAndNeverFails(t *testing.T)
 		t.Fatalf("spool=%d, want 1", sb.spoolCount())
 	}
 }
+
+func TestIngestAndStatusCommands(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	if out := sb.ok("status"); !strings.Contains(out, "stored: 0 project(s)") || !strings.Contains(out, "waiting in the spool: 0") {
+		t.Fatalf("status before anything exists: %q", out)
+	}
+	if _, err := os.Stat(sb.env[config.EnvDataDir]); err == nil {
+		t.Fatal("`status` must not create the data directory")
+	}
+	sb.ok("project", "add", app, "--capture", "conversation")
+	prompt, _ := json.Marshal(map[string]string{"session_id": "s-1", "cwd": app, "hook_event_name": "UserPromptSubmit", "prompt": "remember to use tabs"})
+	for i := 0; i < 3; i++ {
+		sb.hook("UserPromptSubmit", string(prompt))
+	}
+	if out := sb.ok("status"); !strings.Contains(out, "waiting in the spool: 3") || !strings.Contains(out, "sessionkeep ingest") {
+		t.Fatalf("status with a backlog: %q", out)
+	}
+	var rep struct {
+		Data struct{ Ingested, Remaining int }
+	}
+	json.Unmarshal([]byte(sb.ok("ingest", "--json")), &rep)
+	if rep.Data.Ingested != 3 || rep.Data.Remaining != 0 {
+		t.Fatalf("ingest report: %+v", rep.Data)
+	}
+	if out := sb.ok("status"); !strings.Contains(out, "1 session(s), 3 event(s), 3 text record(s)") || !strings.Contains(out, "waiting in the spool: 0") {
+		t.Fatalf("status after ingest: %q", out)
+	}
+	if out := sb.ok("ingest"); !strings.Contains(out, "ingested 0") {
+		t.Fatalf("second ingest: %q", out)
+	}
+	if code, _, _ := sb.run("ingest", "extra"); code != ExitUsage {
+		t.Fatalf("ingest with an argument: exit=%d", code)
+	}
+}
+
+func TestAutoAddEndToEndThroughTheCommands(t *testing.T) {
+	sb := newSandbox(t)
+	fresh := sb.dir("fresh", "pkg")
+	sb.ok("setup", "--auto-add", "auto", "--level", "conversation")
+	prompt, _ := json.Marshal(map[string]string{"session_id": "s-1", "cwd": fresh, "hook_event_name": "UserPromptSubmit", "prompt": "first note"})
+	sb.hook("UserPromptSubmit", string(prompt))
+	sb.hook("UserPromptSubmit", string(prompt))
+	if a, _, _ := sb.which(fresh); a != "auto_register" {
+		t.Fatalf("before ingest: %s", a)
+	}
+	if out := sb.ok("ingest"); !strings.Contains(out, "ingested 2") || !strings.Contains(out, "projects created 1") {
+		t.Fatalf("ingest: %q", out)
+	}
+	if a, l, id := sb.which(fresh); a != "capture" || l != "conversation" || id == "" {
+		t.Fatalf("after ingest the folder should be a registered project: %s %s %s", a, l, id)
+	}
+	if out := sb.ok("project", "list"); !strings.Contains(out, "auto") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("project list: %q", out)
+	}
+}
