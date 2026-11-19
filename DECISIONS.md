@@ -63,6 +63,14 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D27 | Go module path is `sessionkeep` (no hosting location chosen yet) | Provisional; change to the real repository path before any public release |
 | D28 | First local commit of documents, evidence and the 1A-1 scaffold | Approved by owner 2026-11-19 |
 
+## Session 4 additions (2026-11-19)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D29 | [ADR-0007](docs/adr/ADR-0007-unregistered-folder-modes.md): unregistered folders are handled by one setting — `manual`, `ask` (shipped default) or `auto` (owner-enabled, explicit level, exclusion list). `project add` has no default capture level | **Accepted by owner 2026-11-19.** Narrows "never auto-enable global capture" to "never by SessionKeep itself" |
+| D30 | Onboarding is CLI-only in Phase 1A (`sessionkeep setup`); the web onboarding screen is part of Phase 1B and writes the same settings | Recorded; follows ADR-0006 |
+| D31 | Hook-payload field allowlist moves from slice 1A-3 to 1A-4, where payloads are first parsed | Internal sequencing change, recorded |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.
