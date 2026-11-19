@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-19 21:20 UTC • **Project name:** SessionKeep • **Active phase:** 1A (slices 1A-1 … 1A-6 done; 1A-7 next) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed, not yet needed.
+**Last updated:** 2026-11-20 00:30 UTC • **Project name:** SessionKeep • **Active phase:** 1A (slices 1A-1 … 1A-7 done; 1A-8 next) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed, not yet needed.
 
 ## What exists
 
@@ -14,33 +14,33 @@
   - `internal/store`: SQLite writer, engine gate, migrations `0001_foundation`, `0002_project_pause`; project repository functions.
   - `internal/lease`: OS-level single-writer lock. `internal/ingest` and `sessionkeep ingest`: drain the spool into the database (auto-add projects, sessions, evidence, events; quarantine; gap import; roots cache). `sessionkeep status`: stored counts and spool backlog.
   - `internal/plugin` and `sessionkeep plugin write DIR`: generates the Claude Code plugin (exec-form capture hooks for eight events, asynchronous drain hooks after SessionStart and Stop). `sessionkeep ingest --quiet` is the silent form those hooks call.
+  - `internal/instruct`, `sessionkeep remember`, `sessionkeep instruction list|show|supersede|archive`: word-for-word instructions with versions; per-project cache; the bounded session envelope returned by the SessionStart and UserPromptSubmit hooks.
   - `internal/fsx`: atomic file replace that works under concurrent readers on Windows. `scripts/check.sh`: the verification gate, including compile-only builds for Linux, macOS and Windows arm64.
-- **Capture works live**: a real Claude Code session with the generated plugin was captured into a sandbox database. **It is not installed in the owner's Claude Code** — the plugin has only been loaded with `--plugin-dir` for test sessions, and the real data directory has never been created. Not built: instruction commands and injection (so nothing is recalled into a session yet), search commands, checkpoints, UI, export, installer, engine/MCP.
+- **Capture and instruction recall both work live** in test sessions (sandbox data, plugin loaded with `--plugin-dir`). **Still not installed in the owner's Claude Code**, and the real data directory has never been created. Not built: search commands, checkpoints/resume, UI, export, installer, engine/MCP, a way for Claude itself to record an instruction.
 
-## Latest session record (session 6, 2026-11-19)
+## Latest session record (session 7, 2026-11-19/20)
 
 - Agent, working tree: Claude Code (claude-fable-5-2). Local commits on `main`, no remote. See `git log`.
-- Requirements addressed: P1-06 (slice 1A-6). Owner approved the live sessions and confirmed the pause behaviour.
+- Requirements addressed: P1-08 (slice 1A-7).
 - Commands and results (all real):
-  - `bash scripts/check.sh` → **CHECK PASSED**.
-  - `claude plugin validate` on the generated plugin → Validation passed.
-  - Live run 1 (registered synthetic project): 5 events captured; 4 stored by the background drain before the session ended, the `session_end` event stored by the next drain; prompt and reply stored word for word; tool event kept the file path, not file content.
-  - Live run 2 (unregistered folder, ask mode): nothing stored; the reminder reached Claude Code as a hook response. Interactive display **not observed**.
-  - Owner's Claude settings digest identical before and after both runs. Reported cost USD 0.035 + 0.031.
+  - `bash scripts/check.sh` → **CHECK PASSED** at the end. One run in between **failed** (intermittent `TestReplaceWhileReading`), which led to the second-copy fix (D43).
+  - Live session: a global and a project instruction were both followed by Claude in a fresh session; reported cost USD 0.033; owner settings digest unchanged.
+  - Tests that failed for real and led to fixes: instruction order random within one second; a file being replaced looking missing to readers.
+  - Three mutation checks (envelope budget, project scope, archived versions) are each caught by tests.
   - `go test -race` → **not run** (no C compiler).
-- Evidence: `evidence/phase-1/1A-6.md`. Decisions: `DECISIONS.md` session 6 section (D36, D38, D39).
+- Evidence: `evidence/phase-1/1A-7.md`. Decisions: `DECISIONS.md` session 7 section (D38, D40–D43).
 
 ## Not yet verified
 
-Interactive-mode sessions (including whether the reminder is displayed), `/compact`, resume, tool failures and API errors live; coexistence with the owner's other plugins; installation into the real Claude Code configuration; the 2 s hook deadline path; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; symlink/junction paths; a working Codex review; trademark search for SessionKeep.
+How reliably a long or conflicting instruction set is followed; SessionStart re-injection after compaction and on resume; interactive-mode sessions; coexistence with the owner's other plugins that inject at SessionStart; installation into the real Claude Code configuration; why a replaced file can look missing on this machine; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
 
 ## Blockers / awaiting owner
 
-None blocking. To confirm when convenient: D38 (background drains started by plugin hooks after SessionStart and Stop).
+None blocking. Open for the owner when convenient: D40 (should pausing a project also stop its instructions being recalled?).
 
 ## Next smallest task and acceptance checks
 
-**1A-7** (`phases/PHASE_1_PLAN.md`): durable instructions. `sessionkeep remember "<text>" [--scope project|global|branch]` with explicit confirmation of scope and exact text; versioning and supersession (`sessionkeep instruction list|show|supersede|archive`); conflict state; the lease holder writes a per-project instruction cache; the SessionStart and UserPromptSubmit hooks return the envelope from ADR-0002 (manifest of ids and digests, verbatim text up to 9,000 characters, explicit notice when not everything fits). Pass = T05: a 20-instruction fixture is recovered verbatim in a new session at simulated day 7/30/90; superseded text is never injected; an over-budget set produces the coverage notice; with the database unavailable the cached envelope is used and labelled with its timestamp; global instructions apply in every registered project and never in excluded or unregistered folders; one live session shows Claude following an injected instruction (needs approval, uses the subscription); `bash scripts/check.sh` green; raw output in `evidence/phase-1/1A-7.md`.
+**1A-8** (`phases/PHASE_1_PLAN.md`): search and evidence retrieval. `sessionkeep memory search "<query>" [--project …] [--kind …] [--since …] [--limit N] [--cursor …]` over stored text with full-text ranking plus exact matching for error strings, paths and ids; `sessionkeep memory get <id>` and `sessionkeep evidence get <id>` returning the original text with provenance (session, time, who said it, redaction and completeness); project scope enforced before ranking, cross-project search only with an explicit flag; stable pagination; skills in the generated plugin so Claude can call these commands. Pass = T06: an adversarial two-project fixture returns zero foreign rows; exact error string, file path and id lookups hit; punctuation-heavy queries do not error; a query with no match says "not found" and returns nothing; pagination returns every row exactly once; `bash scripts/check.sh` green; raw output in `evidence/phase-1/1A-8.md`.
 
 ## Update template
 

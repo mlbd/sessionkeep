@@ -18,9 +18,11 @@ import (
 	"sessionkeep/internal/capture"
 	"sessionkeep/internal/config"
 	"sessionkeep/internal/ingest"
+	"sessionkeep/internal/instruct"
 	"sessionkeep/internal/lease"
 	"sessionkeep/internal/plugin"
 	"sessionkeep/internal/project"
+	"sessionkeep/internal/redact"
 	"sessionkeep/internal/store"
 )
 
@@ -49,7 +51,13 @@ Usage:
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
-  sessionkeep plugin write DIR         Generate the Claude Code plugin directory for this binary
+  sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]
+                                   Record a standing instruction, word for word. Without --yes it
+                                   only shows what would be saved. TEXT may be - to read stdin.
+  sessionkeep instruction list [--all] | show ID
+  sessionkeep instruction supersede ID "TEXT" [--reason R] [--yes]
+  sessionkeep instruction archive ID [--reason R] [--yes]
+  sessionkeep plugin write DIR        Generate the Claude Code plugin directory for this binary
                                    (changes no Claude Code setting)
   sessionkeep ingest                   Move captured events from the spool into the database
   sessionkeep status                   What is stored and what is still waiting (reads only)
@@ -91,6 +99,7 @@ type invocation struct {
 	pos    []string
 	flags  map[string]string
 	json   bool
+	stdin  io.Reader
 	stdout io.Writer
 	getenv func(string) string
 }
@@ -116,9 +125,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason")
 	if err == nil {
-		inv.stdout, inv.getenv = stdout, getenv
+		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
 	}
 	if err == nil {
@@ -155,6 +164,10 @@ func parse(args []string, valueFlags ...string) (invocation, error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
+		if (name == "yes" || name == "all") && !hasVal { // the two switches that take no value
+			inv.flags[name] = "true"
+			continue
+		}
 		known := false
 		for _, f := range valueFlags {
 			known = known || f == name
@@ -255,6 +268,10 @@ func dispatch(inv invocation) error {
 			return usageErr("status takes no arguments")
 		}
 		return status(inv)
+	case "remember":
+		return remember(inv, rest)
+	case "instruction":
+		return instructionCmd(inv, rest)
 	case "plugin":
 		if len(rest) != 2 || rest[0] != "write" || len(inv.flags) != 0 {
 			return usageErr("usage: sessionkeep plugin write DIR")
@@ -394,6 +411,9 @@ func withStore(st state, fn func(ctx context.Context, s *store.Store) error) err
 	}
 	if err := project.WriteRootsCache(st.paths, roots, time.Now()); err != nil {
 		return fmt.Errorf("the change was saved but the roots cache could not be rewritten (run `sessionkeep setup` to refresh it): %w", err)
+	}
+	if err := instruct.RewriteCaches(ctx, s, st.paths, st.settings.DeviceID, time.Now()); err != nil {
+		return fmt.Errorf("the change was saved but the instruction cache could not be rewritten (run `sessionkeep setup` to refresh it): %w", err)
 	}
 	return nil
 }
@@ -671,6 +691,265 @@ func projectCmd(inv invocation, rest []string) error {
 	return usageErr("unknown project command %q; run `sessionkeep help`", sub)
 }
 
+// MaxInstructionChars bounds one instruction. An instruction longer than this could crowd every
+// other one out of the session envelope (instruct.Budget is 9,000).
+const MaxInstructionChars = 4000
+
+// readText returns the instruction text exactly as given; "-" means read it from stdin.
+func readText(inv invocation, arg string) (string, error) {
+	text := arg
+	if arg == "-" {
+		raw, err := io.ReadAll(io.LimitReader(inv.stdin, 1<<20))
+		if err != nil {
+			return "", err
+		}
+		text = strings.TrimRight(string(raw), "\r\n")
+	}
+	switch n := len([]rune(text)); {
+	case strings.TrimSpace(text) == "":
+		return "", usageErr("the instruction text is empty")
+	case n > MaxInstructionChars:
+		return "", usageErr("the instruction is %d characters; the limit is %d — split it into separate instructions", n, MaxInstructionChars)
+	case strings.ContainsRune(text, 0):
+		return "", usageErr("the instruction text contains a NUL character")
+	}
+	if _, n := redact.Text(text); n > 0 {
+		return "", failErr("looks_like_secret", "the text looks like it contains a password, key or token, so it was not saved; instructions are stored and replayed word for word")
+	}
+	return text, nil
+}
+
+// remember records a standing instruction. Scope has no default, and nothing is saved without
+// --yes: the first run shows exactly what would be stored and where it would apply.
+func remember(inv invocation, rest []string) error {
+	if err := inv.only("scope", "project", "yes"); err != nil {
+		return err
+	}
+	if len(rest) != 1 {
+		return usageErr(`usage: sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]   (TEXT may be - to read stdin)`)
+	}
+	scope := inv.flags["scope"]
+	if scope != "global" && scope != "project" {
+		return &cmdError{ExitNeedsConsent, "scope_required", "say where this applies: --scope project (this project only) or --scope global (every registered project); there is no default"}
+	}
+	if scope == "global" && inv.flags["project"] != "" {
+		return usageErr("--project cannot be combined with --scope global")
+	}
+	text, err := readText(inv, rest[0])
+	if err != nil {
+		return err
+	}
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	var saved store.Instruction
+	var target store.Project
+	err = withStore(st, func(ctx context.Context, s *store.Store) error {
+		if scope == "project" {
+			if target, err = resolveProject(ctx, inv, st, s, inv.flags["project"]); err != nil {
+				return err
+			}
+		}
+		if inv.flags["yes"] == "" {
+			return nil
+		}
+		saved, err = s.AddInstruction(ctx, store.NewInstruction{ID: config.NewID(), VersionID: config.NewID(), Scope: scope, ProjectID: target.ID, Text: text, Author: "owner", Now: time.Now()})
+		return err
+	})
+	if errors.Is(err, store.ErrDuplicateInstruction) {
+		return failErr("duplicate", "%v", err)
+	}
+	if err != nil {
+		return err
+	}
+	where := "every registered project (global)"
+	if scope == "project" {
+		where = fmt.Sprintf("project %q (%.8s)", target.Name, target.ID)
+	}
+	if inv.flags["yes"] == "" {
+		inv.emit(map[string]any{"saved": false, "scope": scope, "project_id": target.ID, "text": text},
+			fmt.Sprintf("NOT SAVED YET. This would be recorded word for word:\n----\n%s\n----\napplies to: %s\nRun the same command with --yes to record it.\n", text, where))
+		return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was saved; add --yes to record exactly this text"}
+	}
+	return inv.emit(saved, fmt.Sprintf("recorded instruction %.8s (revision 1)\napplies to: %s\nit will be given to new sessions from now on\n", saved.ID, where))
+}
+
+// resolveProject finds a project by id, id prefix or folder; with no key it uses the current
+// directory. A folder inside a registered root resolves to that root's project.
+func resolveProject(ctx context.Context, inv invocation, st state, s *store.Store, key string) (store.Project, error) {
+	if key != "" {
+		if p, err := s.FindProject(ctx, st.settings.DeviceID, key); err == nil || errors.Is(err, store.ErrAmbiguousProject) {
+			return p, err
+		}
+	} else {
+		key = "."
+	}
+	abs, err := filepath.Abs(key)
+	if err != nil {
+		return store.Project{}, usageErr("cannot resolve path %q: %v", key, err)
+	}
+	all, err := s.ListProjects(ctx, st.settings.DeviceID)
+	if err != nil {
+		return store.Project{}, err
+	}
+	var roots []project.Root
+	for _, p := range all {
+		for _, r := range p.Roots {
+			roots = append(roots, project.Root{Path: r, ProjectID: p.ID, Level: p.CapturePolicy})
+		}
+	}
+	none := config.DefaultSettings() // exclusions do not matter for naming a project
+	d := project.Decide(st.env(inv.getenv), none, roots, abs)
+	for _, p := range all {
+		if p.ID == d.ProjectID && d.ProjectID != "" {
+			return p, nil
+		}
+	}
+	return store.Project{}, failErr("no_such_project", "%s is not inside a registered project; register it with `sessionkeep project add`, pass --project, or use --scope global", abs)
+}
+
+func instructionCmd(inv invocation, rest []string) error {
+	if len(rest) == 0 {
+		return usageErr("usage: sessionkeep instruction list [--all] | show ID | supersede ID \"TEXT\" [--reason R] [--yes] | archive ID [--reason R] [--yes]")
+	}
+	sub, args := rest[0], rest[1:]
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	notFound := func(err error, key string) error {
+		switch {
+		case errors.Is(err, store.ErrNoInstruction):
+			return failErr("no_such_instruction", "no instruction matches %q (use at least 4 characters of an id from `sessionkeep instruction list`)", key)
+		case errors.Is(err, store.ErrAmbiguousInstruction):
+			return failErr("ambiguous_instruction", "%q matches more than one instruction; use more of the id", key)
+		case errors.Is(err, store.ErrNotActive):
+			return failErr("not_active", "instruction %q is archived and cannot be changed", key)
+		case errors.Is(err, store.ErrDuplicateInstruction):
+			return failErr("duplicate", "the new text is identical to the current text")
+		}
+		return err
+	}
+	switch sub {
+	case "list":
+		if err := inv.only("all"); err != nil {
+			return err
+		}
+		if len(args) != 0 {
+			return usageErr("instruction list takes no arguments")
+		}
+		var all []store.Instruction
+		if err := withStore(st, func(ctx context.Context, s *store.Store) (err error) {
+			all, err = s.ListInstructions(ctx, inv.flags["all"] != "")
+			return err
+		}); err != nil {
+			return err
+		}
+		var b strings.Builder
+		for _, i := range all {
+			scope := i.Scope
+			if i.ProjectID != "" {
+				scope += fmt.Sprintf(" %.8s", i.ProjectID)
+			}
+			first, _, more := strings.Cut(i.Text, "\n")
+			if len([]rune(first)) > 70 {
+				first, more = string([]rune(first)[:70]), true
+			}
+			if more {
+				first += " …"
+			}
+			fmt.Fprintf(&b, "%.8s  %-8s rev %d  %-16s %s\n", i.ID, i.State, i.Revision, scope, first)
+		}
+		if len(all) == 0 {
+			b.WriteString("no instructions recorded\n")
+		}
+		return inv.emit(all, b.String())
+
+	case "show":
+		if err := inv.only(); err != nil {
+			return err
+		}
+		if len(args) != 1 {
+			return usageErr("usage: sessionkeep instruction show ID")
+		}
+		var ins store.Instruction
+		var hist []store.InstructionVersion
+		if err := withStore(st, func(ctx context.Context, s *store.Store) (err error) {
+			if ins, err = s.GetInstruction(ctx, args[0]); err != nil {
+				return err
+			}
+			hist, err = s.InstructionHistory(ctx, ins.ID)
+			return err
+		}); err != nil {
+			return notFound(err, args[0])
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "instruction %s\nscope: %s %s\nstate: %s\n", ins.ID, ins.Scope, ins.ProjectID, ins.State)
+		for _, v := range hist {
+			fmt.Fprintf(&b, "---- revision %d · %s · %s · sha256 %.12s", v.Revision, v.Status, v.CreatedAt, v.Digest)
+			if v.Reason != "" {
+				fmt.Fprintf(&b, " · reason: %s", v.Reason)
+			}
+			fmt.Fprintf(&b, "\n%s\n", v.Text)
+		}
+		return inv.emit(map[string]any{"instruction": ins, "versions": hist}, b.String())
+
+	case "supersede", "archive":
+		if err := inv.only("reason", "yes"); err != nil {
+			return err
+		}
+		want := map[string]int{"supersede": 2, "archive": 1}[sub]
+		if len(args) != want {
+			return usageErr("usage: sessionkeep instruction supersede ID \"TEXT\" [--reason R] [--yes], or sessionkeep instruction archive ID [--reason R] [--yes]")
+		}
+		text := ""
+		if sub == "supersede" {
+			if text, err = readText(inv, args[1]); err != nil {
+				return err
+			}
+		}
+		var before, after store.Instruction
+		if err := withStore(st, func(ctx context.Context, s *store.Store) (err error) {
+			if before, err = s.GetInstruction(ctx, args[0]); err != nil {
+				return err
+			}
+			if before.State != "active" {
+				return store.ErrNotActive
+			}
+			if inv.flags["yes"] == "" {
+				return nil
+			}
+			if sub == "archive" {
+				if err = s.ArchiveInstruction(ctx, before.ID, inv.flags["reason"]); err != nil {
+					return err
+				}
+				after, err = s.GetInstruction(ctx, before.ID)
+				return err
+			}
+			after, err = s.SupersedeInstruction(ctx, before.ID, config.NewID(), text, inv.flags["reason"], "owner", time.Now())
+			return err
+		}); err != nil {
+			return notFound(err, args[0])
+		}
+		if inv.flags["yes"] == "" {
+			preview := fmt.Sprintf("NOT CHANGED YET. Instruction %.8s currently reads:\n----\n%s\n----\n", before.ID, before.Text)
+			if sub == "supersede" {
+				preview += fmt.Sprintf("It would be replaced, word for word, by:\n----\n%s\n----\nThe old text stays in the history.\n", text)
+			} else {
+				preview += "It would be archived: kept in the history, no longer given to sessions.\n"
+			}
+			inv.emit(map[string]any{"changed": false, "current": before, "new_text": text}, preview+"Run the same command with --yes to do it.\n")
+			return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was changed; add --yes to confirm"}
+		}
+		if sub == "archive" {
+			return inv.emit(after, fmt.Sprintf("archived instruction %.8s; it is no longer given to sessions\n", after.ID))
+		}
+		return inv.emit(after, fmt.Sprintf("instruction %.8s is now revision %d; the previous text is kept in its history\n", after.ID, after.Revision))
+	}
+	return usageErr("unknown instruction command %q; run `sessionkeep help`", sub)
+}
+
 // dataDirOf returns the resolved data directory, or a path that cannot exist.
 func dataDirOf(getenv func(string) string) string {
 	p, err := config.Resolve(runtime.GOOS, getenv)
@@ -729,6 +1008,10 @@ func ingestCmd(inv invocation) error {
 	}
 	defer s.Close()
 	rep, err := ingest.Drain(ctx, ingest.Deps{Paths: st.paths, Settings: st.settings, Store: s, GOOS: runtime.GOOS, Now: time.Now, NewID: config.NewID})
+	if err == nil {
+		err = instruct.RewriteCaches(ctx, s, st.paths, st.settings.DeviceID, time.Now())
+		instruct.PruneSessionState(st.paths, time.Now())
+	}
 	text := fmt.Sprintf("ingested %d, already stored %d, quarantined %d, discarded (excluded) %d, projects created %d, gaps imported %d\n",
 		rep.Ingested, rep.Replayed, rep.Quarantined, rep.DiscardedExclude, rep.ProjectsCreated, rep.GapsImported)
 	if err != nil {

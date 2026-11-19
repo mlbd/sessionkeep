@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/instruct"
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/redact"
 )
@@ -151,6 +152,10 @@ func Handle(req Request) (res Result) {
 	}
 	d := project.Decide(req.Env, settings, roots, in.Cwd)
 
+	// Recall is independent of capture: a registered project gets its recorded instructions even
+	// while capture is paused or off. Excluded and unregistered folders get nothing.
+	recall := recallContext(req, in.SessionID, d)
+
 	switch d.Action {
 	case project.ActionCapture, project.ActionAutoRegister:
 	case project.ActionRemind:
@@ -164,10 +169,10 @@ func Handle(req Request) (res Result) {
 		out, _ := json.Marshal(map[string]string{"systemMessage": msg})
 		return Result{Action: d.Action, Stdout: append(out, '\n')}
 	default:
-		return Result{Action: d.Action}
+		return Result{Action: d.Action, Stdout: recall}
 	}
 	if settings.DeviceID == "" {
-		return Result{Action: "unavailable", Gap: gap(req, "no_device_id")}
+		return Result{Action: "unavailable", Stdout: recall, Gap: gap(req, "no_device_id")}
 	}
 
 	ev := Event{
@@ -185,13 +190,51 @@ func Handle(req Request) (res Result) {
 
 	raw, err := json.Marshal(ev)
 	if err != nil {
-		return Result{Action: d.Action, Gap: gap(req, "encode_failed")}
+		return Result{Action: d.Action, Stdout: recall, Gap: gap(req, "encode_failed")}
 	}
 	name := fmt.Sprintf("%020d-%s.evt", req.Now.UnixNano(), ev.EventID)
 	if err := writeDurable(req.Paths.SpoolDir, name, raw); err != nil {
-		return Result{Action: d.Action, Gap: gap(req, "spool_write_failed")}
+		return Result{Action: d.Action, Stdout: recall, Gap: gap(req, "spool_write_failed")}
 	}
-	return Result{Action: d.Action, SpoolFile: filepath.Join(req.Paths.SpoolDir, name)}
+	return Result{Action: d.Action, Stdout: recall, SpoolFile: filepath.Join(req.Paths.SpoolDir, name)}
+}
+
+// recallContext returns the hook response carrying the user's recorded instructions, or nil.
+// SessionStart always sends them (that also covers resume and the restart after compaction).
+// UserPromptSubmit sends them only when the set changed since it was last sent in this session.
+func recallContext(req Request, session string, d project.Decision) []byte {
+	if req.HookEvent != "SessionStart" && req.HookEvent != "UserPromptSubmit" {
+		return nil
+	}
+	if d.ProjectID == "" && d.Action != project.ActionAutoRegister {
+		return nil
+	}
+	respond := func(text string) []byte {
+		out, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": req.HookEvent, "additionalContext": text}})
+		if err != nil {
+			return nil
+		}
+		return append(out, '\n')
+	}
+	cache, err := instruct.Load(req.Paths, d.ProjectID, true)
+	if err != nil {
+		gap(req, "instruction_cache_unreadable")
+		if req.HookEvent != "SessionStart" {
+			return nil
+		}
+		// Do not let a damaged file look like "the user recorded nothing".
+		return respond("SessionKeep is a local memory tool this user installed. The user's recorded instructions could not be read in this session (the local cache file is damaged). Their content is not known here; the user can repair it by running: sessionkeep setup")
+	}
+	if cache == nil || len(cache.Items) == 0 {
+		return nil
+	}
+	digest := instruct.SetDigest(cache.Items)
+	if req.HookEvent == "UserPromptSubmit" && instruct.AlreadySent(req.Paths, session, digest) {
+		return nil
+	}
+	text, _ := instruct.Envelope(cache)
+	instruct.MarkSent(req.Paths, session, digest)
+	return respond(text)
 }
 
 // build fills the payload according to the capture level.

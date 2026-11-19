@@ -90,6 +90,16 @@ Earlier rows are unchanged. Evidence: `evidence/phase-0/README.md`.
 | D38 | Without an engine, drains are started by asynchronous plugin hook entries after `SessionStart` and `Stop` (plus `sessionkeep ingest` by hand). Extends the manual-mode answer the owner accepted for ADR-0003 | Implemented and observed live; **owner to confirm**, since the earlier approval said drains happen only when the user or a skill runs one |
 | D39 | The plugin directory is generated per installation (`sessionkeep plugin write DIR`) and embeds the binary's absolute path; SessionKeep does not edit any Claude Code setting | Internal; follows ADR-0002 |
 
+## Session 7 additions (2026-11-20)
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D38 | Background drains started by plugin hooks | Owner did not object when asked and said to continue; treated as accepted, can be reverted on request |
+| D40 | Recall is independent of capture: a paused or `off` project still receives its recorded instructions; excluded and unregistered folders receive nothing | Provisional; owner may prefer pause to stop recall too |
+| D41 | Instruction scopes built now: global and project. Branch/task/session scopes and contradiction detection are deferred; identical active text in one scope is refused | Scope reduction inside slice 1A-7, recorded so it is not mistaken for done |
+| D42 | `remember` has no default scope and saves nothing without `--yes`; text that looks like a secret is refused, not redacted; one instruction is at most 4,000 characters | Internal; follows the no-default rule of ADR-0007 |
+| D43 | Every atomically written file has a second copy (`.alt`) that readers fall back to, because a file being replaced was measured to look missing for up to 65 ms on the reference machine | Internal; forced by an intermittent test failure (`evidence/phase-1/1A-7.md`) |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

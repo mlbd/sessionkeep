@@ -87,7 +87,7 @@ func TestPathsWithoutEnvironmentIsUnavailable(t *testing.T) {
 }
 
 func TestUnknownCommandAndArgument(t *testing.T) {
-	for _, args := range [][]string{{"remember"}, {"version", "--verbose"}, {"help", "extra"}, {"paths", "--json", "x"}} {
+	for _, args := range [][]string{{"frobnicate"}, {"version", "--verbose"}, {"help", "extra"}, {"paths", "--json", "x"}} {
 		code, out, errOut := run(t, nil, args...)
 		if code != ExitUsage || errOut == "" {
 			t.Fatalf("%v: code=%d out=%q err=%q", args, code, out, errOut)
@@ -97,7 +97,7 @@ func TestUnknownCommandAndArgument(t *testing.T) {
 
 // Commands that are not built must not appear to exist (docs/09: no command without a truthful capability).
 func TestUnbuiltCommandsAreRejected(t *testing.T) {
-	for _, c := range []string{"mcp", "start", "memory", "remember", "search", "review", "sync"} {
+	for _, c := range []string{"mcp", "start", "memory", "search", "resume", "review", "sync"} {
 		if code, _, _ := run(t, nil, c); code != ExitUsage {
 			t.Fatalf("%q returned %d, want usage error", c, code)
 		}

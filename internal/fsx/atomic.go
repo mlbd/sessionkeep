@@ -18,9 +18,27 @@ const (
 	retryWait = 2 * time.Millisecond
 )
 
-// WriteAtomic replaces path with data so that readers see either the old or the new content,
-// never a partial file: write a temp file in the same directory, flush it, then rename over.
+// AltSuffix names the second copy WriteAtomic keeps next to every file.
+//
+// Measured on Windows 10: even with a POSIX-semantics rename, a reader occasionally sees "file
+// not found" for up to tens of milliseconds while a file is being replaced. For SessionKeep that
+// would be dangerous — a hook that finds no roots cache concludes that no project is registered
+// and captures nothing. So every file is written twice, one after the other, and a reader that
+// cannot find the first copy uses the second. The two are never replaced at the same instant, so
+// once a file exists a reader always finds one of them, without waiting.
+const AltSuffix = ".alt"
+
+// WriteAtomic replaces path with data so that readers using ReadFile see either the old or the
+// new content, never a partial file and never a missing one.
 func WriteAtomic(path string, data []byte) error {
+	if err := writeOne(path, data); err != nil {
+		return err
+	}
+	return writeOne(path+AltSuffix, data)
+}
+
+// writeOne writes a temp file in the same directory, flushes it, then renames it over path.
+func writeOne(path string, data []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
@@ -47,12 +65,25 @@ func WriteAtomic(path string, data []byte) error {
 	return err
 }
 
-// ReadFile reads a file that another process may be replacing with WriteAtomic. "Does not exist"
-// is returned at once; any other failure is retried briefly before it is reported.
+// ReadFile reads a file written with WriteAtomic. If the file is momentarily absent because it
+// is being replaced, the second copy is used (it may be one version older for an instant).
+// "Does not exist" is returned, immediately, only when neither copy exists. Other failures are
+// retried briefly before they are reported.
 func ReadFile(path string) ([]byte, error) {
 	for i := 0; ; i++ {
 		raw, err := readOnce(path)
-		if err == nil || errors.Is(err, os.ErrNotExist) || i >= retries {
+		if errors.Is(err, os.ErrNotExist) {
+			if alt, altErr := readOnce(path + AltSuffix); altErr == nil {
+				return alt, nil
+			} else if !errors.Is(altErr, os.ErrNotExist) {
+				err = altErr
+			} else if again, againErr := readOnce(path); againErr == nil {
+				return again, nil // the writer finished between our two looks
+			} else {
+				return nil, err
+			}
+		}
+		if err == nil || i >= retries {
 			return raw, err
 		}
 		time.Sleep(retryWait)

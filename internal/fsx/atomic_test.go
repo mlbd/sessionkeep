@@ -55,6 +55,32 @@ func TestReplaceWhileReading(t *testing.T) {
 	}
 }
 
+// If the primary copy is gone (the moment of a replace, or a user deleting it), the second copy
+// answers; "not found" is reported only when neither exists.
+func TestSecondCopyAnswersWhenThePrimaryIsMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := WriteAtomic(path, []byte("v1")); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(path + AltSuffix); string(raw) != "v1" {
+		t.Fatalf("second copy holds %q", raw)
+	}
+	os.Remove(path)
+	if raw, err := ReadFile(path); err != nil || string(raw) != "v1" {
+		t.Fatalf("with the primary missing: %q, %v", raw, err)
+	}
+	os.Remove(path + AltSuffix)
+	if _, err := ReadFile(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("with both missing: want not-exist, got %v", err)
+	}
+	// A damaged primary is returned as is: falling back would hide the damage.
+	WriteAtomic(path, []byte("good"))
+	os.WriteFile(path, []byte("damaged"), 0o600)
+	if raw, _ := ReadFile(path); string(raw) != "damaged" {
+		t.Fatalf("got %q; a present primary must always win", raw)
+	}
+}
+
 func TestReadFileMissingIsImmediate(t *testing.T) {
 	if _, err := ReadFile(filepath.Join(t.TempDir(), "nope")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("want not-exist, got %v", err)
