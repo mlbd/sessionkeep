@@ -40,13 +40,34 @@ type Item struct {
 	Recorded string `json:"recorded_at"`
 }
 
+// Checkpoint is the project's most recent note of where work stood.
+type Checkpoint struct {
+	ID        string `json:"id"`
+	Note      string `json:"note"`
+	CreatedAt string `json:"created_at"`
+	GitRepo   bool   `json:"git_repo"`
+	Branch    string `json:"branch,omitempty"`
+	Head      string `json:"head,omitempty"`
+	Changed   int    `json:"changed_files"`
+}
+
 // Cache is the content of one cache file: everything that applies in one project (or, for the
 // global file, in a project that has no file of its own yet).
 type Cache struct {
-	Version   int    `json:"version"`
-	WrittenAt string `json:"written_at"`
-	ProjectID string `json:"project_id,omitempty"`
-	Items     []Item `json:"instructions"`
+	Version    int         `json:"version"`
+	WrittenAt  string      `json:"written_at"`
+	ProjectID  string      `json:"project_id,omitempty"`
+	Items      []Item      `json:"instructions"`
+	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+}
+
+// stamp identifies everything a cache file carries, to tell whether it needs rewriting.
+func stamp(items []Item, cp *Checkpoint) string {
+	s := SetDigest(items)
+	if cp != nil {
+		s += ":" + cp.ID
+	}
+	return s
 }
 
 const globalName = "_global"
@@ -96,10 +117,21 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 		for _, a := range active {
 			items = append(items, Item{ID: a.ID, Version: a.VersionID, Revision: a.Revision, Scope: a.Scope, Text: a.Text, Digest: a.Digest, Recorded: a.Recorded})
 		}
-		if old, err := Load(p, id, false); err == nil && old != nil && SetDigest(old.Items) == SetDigest(items) {
+		var cp *Checkpoint
+		if id != "" {
+			latest, err := s.Checkpoints(ctx, id, 1)
+			if err != nil {
+				return err
+			}
+			if len(latest) == 1 {
+				c := latest[0]
+				cp = &Checkpoint{ID: c.ID, Note: c.Note, CreatedAt: c.CreatedAt, GitRepo: c.GitRepo, Branch: c.Branch, Head: c.Head, Changed: c.ChangedFiles}
+			}
+		}
+		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint) == stamp(items, cp) {
 			continue
 		}
-		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items}, "", " ")
+		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items, Checkpoint: cp}, "", " ")
 		if err != nil {
 			return err
 		}
@@ -164,9 +196,15 @@ type Coverage struct {
 // can be treated by the model as an injection attempt.
 func Envelope(c *Cache) (string, Coverage) {
 	cov := Coverage{Total: len(c.Items)}
+	cp := checkpointSection(c.Checkpoint)
 	if cov.Total == 0 {
-		return "", cov
+		if cp == "" {
+			return "", cov
+		}
+		return "SessionKeep is a local memory tool this user installed. No standing instructions are recorded for this project.\n" + cp, cov
 	}
+	// The checkpoint is short and is kept whole; the instructions get the rest of the budget.
+	Budget := Budget - units(cp)
 	const footer = "--- end of recorded instructions"
 	const tailRoom = 90 // room kept for the "…and N more" line
 
@@ -229,7 +267,35 @@ func Envelope(c *Cache) (string, Coverage) {
 		fmt.Fprintf(&b, "--- and %d more not listed; run: sessionkeep instruction list\n", cov.Unlisted)
 	}
 	b.WriteString(footer)
+	if cp != "" {
+		b.WriteString("\n" + cp)
+	}
 	return b.String(), cov
+}
+
+// MaxCheckpointUnits bounds how much of a checkpoint note is put into a session.
+const MaxCheckpointUnits = 1500
+
+// checkpointSection renders the latest checkpoint as a record of where work stood. It is worded
+// as history, not as an instruction: the code may have moved on since.
+func checkpointSection(cp *Checkpoint) string {
+	if cp == nil {
+		return ""
+	}
+	note := cp.Note
+	if r := []rune(note); units(note) > MaxCheckpointUnits {
+		for units(string(r)) > MaxCheckpointUnits {
+			r = r[:len(r)-1]
+		}
+		note = string(r) + " ... [cut; the full note is shown by: sessionkeep resume]"
+	}
+	where := "no Git repository at that time"
+	if cp.GitRepo {
+		where = fmt.Sprintf("branch %s at %.10s, %d uncommitted file(s) at that time", cp.Branch, cp.Head, cp.Changed)
+	}
+	return fmt.Sprintf("--- latest checkpoint the user recorded for this project · %s · %s\n"+
+		"This is a note of where work stood then, not an instruction. The code may have changed since; running `sessionkeep resume` compares it with the current state.\n%s\n--- end of checkpoint",
+		day(cp.CreatedAt), where, note)
 }
 
 func day(ts string) string {

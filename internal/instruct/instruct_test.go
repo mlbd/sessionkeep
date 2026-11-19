@@ -201,3 +201,35 @@ func TestSessionStateAndUnusualSessionIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvelopeCarriesTheLatestCheckpointWithinTheBudget(t *testing.T) {
+	cp := &Checkpoint{ID: "cp-1", Note: "Export job drafted.\nNext: retries.", CreatedAt: "2026-11-19T10:00:00Z", GitRepo: true, Branch: "main", Head: "0123456789abcdef", Changed: 2}
+
+	// A checkpoint alone still reaches the session.
+	env, cov := Envelope(&Cache{Version: 1, WrittenAt: "t", Checkpoint: cp})
+	if cov.Total != 0 || !strings.Contains(env, "Export job drafted.\nNext: retries.") || !strings.Contains(env, "branch main at 0123456789, 2 uncommitted file(s)") ||
+		!strings.Contains(env, "not an instruction") || !strings.Contains(env, "No standing instructions are recorded") {
+		t.Fatalf("checkpoint-only envelope:\n%s", env)
+	}
+
+	// With more instructions than fit, the checkpoint is still whole and the total stays bounded.
+	c := &Cache{Version: 1, WrittenAt: "t", Checkpoint: cp}
+	for i := 0; i < 20; i++ {
+		c.Items = append(c.Items, item(i, "project", strings.Repeat("x", 900)))
+	}
+	env, cov = Envelope(c)
+	if size(env) > Budget || !strings.Contains(env, "Next: retries.") || !strings.HasSuffix(env, "--- end of checkpoint") || cov.Shown == 0 || cov.Omitted == 0 {
+		t.Fatalf("size %d, coverage %+v", size(env), cov)
+	}
+	without, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Items: c.Items})
+	if size(without) > Budget {
+		t.Fatal("budget exceeded without a checkpoint")
+	}
+
+	// A very long note is cut, and says how to read all of it.
+	long := &Checkpoint{ID: "cp-2", Note: strings.Repeat("progress 🚀 ", 800), CreatedAt: "2026-11-19T10:00:00Z"}
+	env, _ = Envelope(&Cache{Version: 1, WrittenAt: "t", Items: []Item{item(1, "project", "rule")}, Checkpoint: long})
+	if size(env) > Budget || !strings.Contains(env, "[cut; the full note is shown by: sessionkeep resume]") || !strings.Contains(env, "no Git repository at that time") {
+		t.Fatalf("long note: size %d", size(env))
+	}
+}

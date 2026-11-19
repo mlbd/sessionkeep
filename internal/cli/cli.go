@@ -1402,6 +1402,9 @@ func ingestCmd(inv invocation) error {
 	}
 	text := fmt.Sprintf("ingested %d, already stored %d, quarantined %d, discarded (excluded) %d, projects created %d, gaps imported %d\n",
 		rep.Ingested, rep.Replayed, rep.Quarantined, rep.DiscardedExclude, rep.ProjectsCreated, rep.GapsImported)
+	if rep.Recovered > 0 {
+		text += fmt.Sprintf("%d event(s) were recovered from a capture that had been interrupted before it finished saving\n", rep.Recovered)
+	}
 	if rep.Deferred > 0 {
 		text += fmt.Sprintf("%d file(s) were busy (held open by another program) and are left for the next run; nothing is lost\n", rep.Deferred)
 	}

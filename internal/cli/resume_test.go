@@ -153,3 +153,36 @@ func TestCheckpointAndResumeWithoutGitAndAcrossProjects(t *testing.T) {
 		t.Fatalf("secret-looking note: exit=%d %q", code, errOut)
 	}
 }
+
+// A new session is told where work stopped without having to ask: the latest checkpoint is part
+// of what SessionStart delivers, for that project only.
+func TestLatestCheckpointIsDeliveredAtSessionStart(t *testing.T) {
+	sb := newSandbox(t)
+	a, b := sb.dir("alpha"), sb.dir("beta")
+	sb.ok("project", "add", a, "--capture", "conversation")
+	sb.ok("project", "add", b, "--capture", "conversation")
+	if ctx := sb.inject("SessionStart", "s0", a); ctx != "" {
+		t.Fatalf("nothing recorded yet: %q", ctx)
+	}
+	sb.ok("checkpoint", "First draft done. Next: write the retry logic.", "--project", a)
+	ctx := sb.inject("SessionStart", "s1", a)
+	if !strings.Contains(ctx, "First draft done. Next: write the retry logic.") || !strings.Contains(ctx, "not an instruction") {
+		t.Fatalf("checkpoint not delivered:\n%s", ctx)
+	}
+	sb.ok("checkpoint", "Retry logic done. Next: tests.", "--project", a)
+	ctx = sb.inject("SessionStart", "s2", a)
+	if !strings.Contains(ctx, "Retry logic done. Next: tests.") || strings.Contains(ctx, "First draft done") {
+		t.Fatalf("only the latest checkpoint should be delivered:\n%s", ctx)
+	}
+	sb.remember("project", "Use ISO dates.", "--project", a)
+	if ctx := sb.inject("SessionStart", "s3", a); !strings.Contains(ctx, "Use ISO dates.") || !strings.Contains(ctx, "Retry logic done. Next: tests.") {
+		t.Fatalf("instructions and checkpoint together:\n%s", ctx)
+	}
+	if ctx := sb.inject("SessionStart", "s4", b); ctx != "" {
+		t.Fatalf("another project received the checkpoint: %q", ctx)
+	}
+	sb.ok("forget", "project", a, "--yes")
+	if ctx := sb.inject("SessionStart", "s5", a); ctx != "" {
+		t.Fatalf("a deleted project's checkpoint is still delivered: %q", ctx)
+	}
+}

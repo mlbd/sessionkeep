@@ -365,3 +365,39 @@ func TestStemmingMigrationRebuildsAnExistingIndex(t *testing.T) {
 		t.Fatalf("after migrating: method=%s hits=%d", res.Method, len(res.Hits))
 	}
 }
+
+// The statements on the hot paths must use an index, not read every row. This guards against the
+// kind of slowdown the scale run found in the record lookup.
+func TestHotQueriesUseIndexes(t *testing.T) {
+	s, _ := openTemp(t)
+	plan := func(q string, args ...any) string {
+		rows, err := s.db.Query("explain query plan "+q, args...)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var a, b, c int
+			var detail string
+			rows.Scan(&a, &b, &c, &detail)
+			out = append(out, detail)
+		}
+		return strings.Join(out, " | ")
+	}
+	for name, p := range map[string]string{
+		"record lookup by id or prefix": plan(`select e.id from evidence e where e.id >= ? and e.id < ? and e.project_id = ? order by e.id limit 2`, "a", "b", "p"),
+		"event replay check":            plan(`select count(*) from events where event_key = ?`, "k"),
+		"session lookup":                plan(`select id from sessions where project_id = ? and agent = ? and device_id = ? and external_session_id = ?`, "p", "a", "d", "e"),
+		"auto-add root lookup":          plan(`select project_id from project_roots where device_id = ? and normalized_path = ?`, "d", "p"),
+		"recent exchanges":              plan(`select id from evidence where project_id = ? and text is not null and trust_level in ('user','assistant') order by seq desc limit ?`, "p", 6),
+		"latest checkpoint":             plan(`select id from checkpoints where project_id = ? order by created_at desc, id limit ?`, "p", 3),
+	} {
+		if strings.Contains(p, "SCAN") && !strings.Contains(p, "USING") {
+			t.Errorf("%s reads the whole table: %s", name, p)
+		}
+		if !strings.Contains(p, "SEARCH") && !strings.Contains(p, "USING") {
+			t.Errorf("%s does not use an index: %s", name, p)
+		}
+	}
+}

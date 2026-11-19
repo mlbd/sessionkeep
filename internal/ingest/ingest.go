@@ -34,9 +34,16 @@ type Report struct {
 	GapsImported     int `json:"gaps_imported"`
 	// Deferred counts files left for the next drain because another program (typically antivirus
 	// scanning a file that was just written) held them open. Nothing is lost.
-	Deferred  int `json:"deferred"`
+	Deferred int `json:"deferred"`
+	// Recovered counts complete events found in temp files left by a hook that stopped before
+	// its final rename (for example when it reached its time limit on a stalled disk).
+	Recovered int `json:"recovered"`
 	Remaining int `json:"remaining"`
 }
+
+// orphanAfter is how old a spool temp file must be before its writer is certainly gone: several
+// times the hook's own time limit.
+const orphanAfter = 5 * capture.Deadline
 
 // Deps are the things Drain needs. AfterCommit, if set, runs after each event's transaction has
 // committed and before its spool file is deleted; tests use it to simulate a crash at that point.
@@ -78,10 +85,34 @@ func Drain(ctx context.Context, d Deps) (Report, error) {
 		case e.IsDir():
 		case strings.HasSuffix(e.Name(), ".evt"):
 			files = append(files, e.Name())
-		case strings.HasSuffix(e.Name(), ".tmp"):
-			// A hook that died mid-write leaves a temp file. Anything older than an hour is dead.
-			if fi, err := e.Info(); err == nil && d.Now().Sub(fi.ModTime()) > time.Hour {
-				os.Remove(filepath.Join(d.Paths.SpoolDir, e.Name()))
+		case strings.HasSuffix(e.Name(), ".evt.tmp") && strings.HasPrefix(e.Name(), "."):
+			// A hook writes the whole event to a temp file and then renames it. If it stops in
+			// between, the temp file stays. Once it is older than the hook can possibly still be
+			// running, a complete event in it is recovered; an incomplete one is kept for an hour
+			// (in case that judgement is wrong) and then discarded with a recorded gap.
+			fi, err := e.Info()
+			if err != nil {
+				continue
+			}
+			age := d.Now().Sub(fi.ModTime())
+			if age < orphanAfter {
+				continue
+			}
+			tmp := filepath.Join(d.Paths.SpoolDir, e.Name())
+			final := strings.TrimSuffix(strings.TrimPrefix(e.Name(), "."), ".tmp")
+			raw, err := fsx.ReadFile(tmp)
+			var ev capture.Event
+			if err == nil && json.Unmarshal(raw, &ev) == nil && ev.Version == 1 && ev.EventID != "" {
+				if os.Rename(tmp, filepath.Join(d.Paths.SpoolDir, final)) == nil {
+					files = append(files, final)
+					rep.Recovered++
+				}
+				continue
+			}
+			if age > time.Hour {
+				if d.Store.AddGap(ctx, "partial:"+e.Name(), "spool", "partial_event_discarded", d.Now().UTC().Format(time.RFC3339Nano), false) == nil {
+					os.Remove(tmp)
+				}
 			}
 		}
 	}

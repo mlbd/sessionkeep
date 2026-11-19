@@ -157,6 +157,16 @@ Owner instruction: "ok lets finish rest phase 1", given in reply to a list of se
 | D66 | Auto-start uses the current user's "Run at logon" registry list, not a scheduled task | **Changed from the agreed default 5**: Windows refused to create a logon-triggered task without administrator rights. Same effect, no elevation; owner to note |
 | D67 | Auto-start is opt-in and only stores waiting events once at logon; there is still no resident process | Follows ADR-0003 |
 
+## Session 14 additions (2026-11-20) — Phase 1 acceptance run
+
+| ID | Decision | Status / reason |
+|---|---|---|
+| D68 | The latest checkpoint is delivered at SessionStart together with the instructions, worded as a record of where work stood | Implements the spec's "new session receives the last task checkpoint"; forced by the demonstration (`evidence/phase-1/ACCEPTANCE.md` §5.4) |
+| D69 | The drain recovers a complete event from a spool temp file older than five hook time limits, and records a gap when it discards an incomplete one after an hour | Closes a silent-loss path found under disk load (§5.5). The hook's 2 s limit is unchanged |
+| D70 | Record lookup by id uses an index range; query plans of hot statements are checked by a test | Performance defect found at 100k records (§5.3) |
+| D71 | A C compiler (w64devkit 2.11.0, checksum verified) lives in the git-ignored `.tools/cc`; the gate runs the race detector when it is present | Owner default 6 |
+| D72 | Phase 1 gate status as the agent sees it: **not met by the plan's wording** (several test rows partial, transcript tests not run); no known unresolved data-loss or cross-project defect | **Owner decision required** |
+
 ## Approval rules
 
 Changes to scope, licensing, public distribution, cloud trust, provider data sharing, secret policy or security defaults require explicit owner approval. Reversible internal implementation choices may be approved in a phase plan; record reasons and tests. No claims of API availability, supported platform or measurements based solely on discussion.

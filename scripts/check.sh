@@ -10,6 +10,8 @@ if [ -x .tools/go/bin/go ] || [ -x .tools/go/bin/go.exe ]; then
   T="$(pwd)/.tools"
   export GOROOT="$T/go" GOPATH="$T/gopath" GOCACHE="$T/gocache" GOFLAGS=-modcacherw PATH="$T/go/bin:$PATH"
 fi
+# A C compiler in .tools/cc (optional) lets the race detector run on Windows.
+if [ -x .tools/cc/w64devkit/bin/gcc.exe ]; then PATH="$(pwd)/.tools/cc/w64devkit/bin:$PATH"; fi
 export GOTOOLCHAIN=local
 go version || { echo "FAIL: Go not found"; exit 1; }
 
@@ -44,7 +46,7 @@ step "go test -race"
 if [ "$(CGO_ENABLED=1 go env CGO_ENABLED)" = "1" ] && command -v gcc >/dev/null 2>&1; then
   CGO_ENABLED=1 go test -race -count=1 ./... || fail=1
 else
-  echo "NOT RUN: the race detector needs cgo and a C compiler, which this machine does not have"
+  echo "NOT RUN: the race detector needs cgo and a C compiler (none on PATH or in .tools/cc)"
 fi
 
 step "cross-compile (compile only; not executed on these systems)"

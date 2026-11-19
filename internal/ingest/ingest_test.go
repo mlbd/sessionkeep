@@ -426,3 +426,53 @@ func TestBusySpoolFileIsDeferredNotFatal(t *testing.T) {
 		t.Fatalf("events=%s, want 2", got)
 	}
 }
+
+// A hook that stops between writing its temp file and renaming it (it reached its time limit on a
+// stalled disk, or was killed) must not lose the event. Found in the Phase 1 acceptance run.
+func TestCompleteEventLeftInATempFileIsRecovered(t *testing.T) {
+	r := newRig(t, "ask", "")
+	r.addProject(`c:\work\app`, "conversation")
+	res := r.hook("UserPromptSubmit", "s-1", `C:\Work\App`, map[string]any{"prompt": "written but never renamed"})
+	name := filepath.Base(res.SpoolFile)
+	orphan := filepath.Join(r.paths.SpoolDir, "."+name+".tmp")
+	if err := os.Rename(res.SpoolFile, orphan); err != nil { // as if the hook had stopped before its rename
+		t.Fatal(err)
+	}
+	half := filepath.Join(r.paths.SpoolDir, ".00000000000000000009-half.evt.tmp")
+	os.WriteFile(half, []byte(`{"version":1,"event_id":"x","payl`), 0o600)
+
+	d := r.deps()
+	d.Now = time.Now
+	// Fresh temp files may belong to a hook that is still running: leave them alone.
+	rep, err := Drain(ctx, d)
+	if err != nil || rep.Recovered != 0 || rep.Ingested != 0 || r.spoolFiles() != 2 {
+		t.Fatalf("fresh temp files must be left alone: %+v %v", rep, err)
+	}
+	// Older than any hook can still be running: the complete one is recovered and stored.
+	old := time.Now().Add(-time.Minute)
+	os.Chtimes(orphan, old, old)
+	os.Chtimes(half, old, old)
+	rep, err = Drain(ctx, d)
+	if err != nil || rep.Recovered != 1 || rep.Ingested != 1 {
+		t.Fatalf("complete temp file not recovered: %+v %v", rep, err)
+	}
+	if got := r.q(`select text from evidence`); got != "written but never renamed" {
+		t.Fatalf("recovered text: %q", got)
+	}
+	if r.spoolFiles() != 1 {
+		t.Fatalf("the incomplete temp file should still be there for now; spool has %d entries", r.spoolFiles())
+	}
+	// The incomplete one is discarded after an hour, with a gap on record.
+	older := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(half, older, older)
+	if _, err := Drain(ctx, d); err != nil || r.spoolFiles() != 0 {
+		t.Fatalf("incomplete temp file not cleaned up: %v, %d entries", err, r.spoolFiles())
+	}
+	if got := r.q(`select count(*)||'/'||max(reason) from capture_gaps where source = 'spool'`); got != "1/partial_event_discarded" {
+		t.Fatalf("discarding a partial event must be recorded: %s", got)
+	}
+	// Recovering twice cannot duplicate.
+	if rep, _ := Drain(ctx, d); rep.Recovered != 0 || r.q(`select count(*) from events`) != "1" {
+		t.Fatalf("second drain: %+v", rep)
+	}
+}

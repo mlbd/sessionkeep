@@ -1,41 +1,53 @@
 # Project status
 
-**Last updated:** 2026-11-20 08:00 UTC • **Project name:** SessionKeep • **Active phase:** 1B (Phase 1A slices 1A-1 … 1A-9 are built; the 1A owner demo has not happened) • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19. On 2026-11-20 the owner asked for the rest of Phase 1 to be done in one run and accepted the defaults listed in `DECISIONS.md` (session 9). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 10:30 UTC • **Project name:** SessionKeep • **Active phase:** Phase 1 built, **awaiting the owner's gate decision** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted by the owner on 2026-11-19; rest-of-Phase-1 defaults accepted on 2026-11-20 (`DECISIONS.md` session 9). Awaiting owner: ADR-0008 (plain dashboard pages instead of React), D66 (logon list instead of scheduled task), D72 (Phase 1 gate). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
-## What exists (Go module `sessionkeep`, CGO-free)
+## Start here
 
-- **Capture:** `sessionkeep hook <Event>` (field allowlist, capture level, redaction, durable spool, gap log, always exit 0); `sessionkeep ingest` with an OS-level lease; background drains started by plugin hooks.
+`evidence/phase-1/ACCEPTANCE.md` is the single record of what Phase 1 does, what was measured, which test rows are pass / partial / not run, and which defects the acceptance run found.
+
+## What exists (Go module `sessionkeep`, CGO-free, one program of about 20 MB)
+
+- **Capture:** `sessionkeep hook <Event>` called by Claude Code hooks (field allowlist, capture level, redaction, durable spool, always exit 0); `sessionkeep ingest` under an OS-level lease; background drains started by the plugin's own hooks; recovery of interrupted captures.
 - **Consent:** `setup` (manual / ask / auto), `project add|list|pause|resume|capture|which`, `exclude add|remove|list`.
-- **Instructions:** `remember`, `instruction list|show|supersede|archive`; bounded envelope injected at SessionStart (and on a prompt when the set changed).
-- **Recall:** `memory search`, `memory get`, `checkpoint`, `resume`; `status`, `doctor`, `paths`.
-- **Claude Code plugin:** `sessionkeep plugin write DIR` generates exec-form hooks and three skills (`recall`, `remember`, `resume`).
-- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0003.
-- **Not installed in the owner's Claude Code.** Everything has run in sandboxes with `--plugin-dir`; the real per-user data directory has never been created.
-- **MCP (optional):** `sessionkeep mcp` with four read-only tools; `plugin write --with-mcp`.
-- **Dashboard:** `sessionkeep dashboard` — loopback-only server, one-time sign-in link, six plain pages (overview, projects/onboarding, search, instructions, resume, diagnostics). **Not yet looked at in a browser by anyone.**
-- **Data control:** `export FILE` (unencrypted zip with manifest), `import FILE [--dry-run]` (empty data directory only), `forget record|captured|project` with preview; deletion buttons in the dashboard.
-- **Lifecycle:** `install [--with-mcp]`, `uninstall [--purge-data] [--yes]`, `autostart enable|disable|status` (per-user logon entry, Windows only), install checks in `doctor`.
-- **Not built:** a resident engine process (by design so far), signing, updates.
+- **Instructions and continuity:** `remember`, `instruction list|show|supersede|archive`, `checkpoint`, `resume`; instructions and the latest checkpoint are delivered at SessionStart in a bounded envelope.
+- **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`.
+- **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
+- **Surfaces:** generated Claude Code plugin with three skills (`plugin write`), optional read-only MCP server (`mcp`), local dashboard (`dashboard`).
+- **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
+- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0004.
 
-## Latest session record (session 13, 2026-11-20)
+## What has not happened
 
-- Agent, working tree: Claude Code (claude-fable-5-2). Local commits on `main`, no remote. See `git log`.
-- Slices done in this run so far: 1A-9, 1B-1, 1B-2, 1B-3, 1B-4. `bash scripts/check.sh` → CHECK PASSED after each, with one exception recorded in `evidence/phase-1/1B-3.md` (an intermittent failure that exposed a real defect in the drain; fixed, suite then green ten times in a row).
-- 1B-4: real install into a sandbox works from a folder with spaces and accents; Claude Code accepted the generated marketplace and plugin in an isolated profile; the owner's Claude settings digest is unchanged; a logon-triggered scheduled task could not be created without administrator rights, so auto-start uses the per-user logon list instead (D66); the entry was created, run by hand and removed.
-- Four of ten pre-approved live sessions used. `go test -race` still **not run**.
-- Evidence: `evidence/phase-1/1B-4.md`. Decisions: `DECISIONS.md` session 13.
+- **SessionKeep is not installed in the owner's Claude Code.** Every run used sandboxes and `--plugin-dir` or an isolated Claude profile. The real data directory and install folder do not exist. Nothing has been captured from the owner's real sessions.
+- **Nobody has opened the dashboard in a browser.**
+- Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
+- No remote exists; all commits are local on `main`.
+
+## Latest session record (session 14, 2026-11-20)
+
+- Agent: Claude Code (claude-fable-5-2). See `git log` for the commits of this run (1A-9, 1B-1 … 1B-5 and two fixes).
+- `bash scripts/check.sh` → **CHECK PASSED**, including `go test -race` (no race reported). Suite also green ten times in a row after the last concurrency fix.
+- End-to-end demonstration with three real Claude Code sessions: every required step passed on the second run; the first run exposed a recall gap (checkpoint not delivered) that was fixed.
+- 100,000-record run: word search p95 6.6–29 ms; literal search about 300–500 ms (**over the 300 ms target**); hook p95 21.5 ms.
+- Product defects found by this acceptance run and fixed: drain failing on a briefly locked spool file; record lookup scanning every row; one event silently lost when a hook hit its time limit under disk load (now recovered by the drain).
+- Process slips, recorded in the acceptance file: one commit made with a failing gate; one edit script that emptied a source file (restored from git).
+- All ten pre-approved live sessions are used. Any further live session needs new approval.
 
 ## Not yet verified
 
-A real install on the owner's machine and a real Windows logon running the auto-start entry; whether any console window appears. How the dashboard pages look and behave in a real browser (layout, contrast, keyboard flow, phone width). Interactive-mode sessions; SessionStart re-injection after compaction/resume; the confirm half of the `remember` skill; coexistence with the owner's other plugins; installation into the real Claude Code configuration; search speed on a large store; disk full and power loss; the race detector; any execution on Linux, macOS, arm64 or Windows 11; a working Codex review; trademark search for SessionKeep.
+A real install and real daily use; the dashboard in a browser; a real Windows logon running the auto-start entry; whether any console window appears; interactive-mode sessions; SessionStart after compaction or resume; coexistence with the owner's other plugins; disk full and power loss; fuzzing; 20 real concurrent sessions; import of an older data version; any other operating system; a working Codex review; trademark search for SessionKeep.
 
 ## Blockers / awaiting owner
 
-None blocking. For the owner: look at the dashboard pages (`sessionkeep dashboard`); confirm or reverse ADR-0008 (plain pages instead of React); the 1A gate decision to install for real, once the installer exists.
+1. **Phase 1 gate (D72):** accept for a private pilot with the partial rows listed in the acceptance file, or say what must be closed first.
+2. ADR-0008: keep the plain dashboard pages or ask for React.
+3. D66: auto-start through the per-user logon list (a scheduled logon task needs administrator rights).
+4. If the gate is accepted: run `sessionkeep install` and the two `claude plugin` commands it prints.
 
 ## Next smallest task and acceptance checks
 
-**1B-5** (`phases/PHASE_1_PLAN.md`): Phase 1 acceptance run. Put a C compiler in `.tools` and run the suite with the race detector; measure on the reference machine: hook latency, search latency and database size at 100k stored records, drain throughput, idle memory of each optional process; run the required end-to-end demonstration from `phases/PHASE_1.md` as one script against the real binary (register, live session with an instruction, stop/second session, recall, supersede, 90-day age, second project isolation, export, restore, compare); walk the T01–T09, T18, T21, T23 rows and mark each pass / partial / not run with the evidence file; write `evidence/phase-1/ACCEPTANCE.md` and the Phase 1 gate summary for the owner. Nothing in it may be marked passed without a run behind it.
+Nothing is approved beyond Phase 1. Depending on the owner's gate decision, the candidates are: (a) close named gaps from the acceptance file — disk-full test, literal-search speed, fuzzing of the hook and import parsers, transcript reconciliation, branch scope; (b) support the owner through a real install and a week of real use, collecting capture gaps and recall misses; (c) start Phase 2 planning. Phase 2 and later must not start before the owner approves the Phase 1 gate (`ROADMAP.md`).
 
 ## Update template
 

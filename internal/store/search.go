@@ -326,13 +326,16 @@ func (s *Store) GetEvidence(ctx context.Context, idOrPrefix, projectID string, a
 		from evidence e join projects p on p.id = e.project_id
 		left join events v on v.evidence_id = e.id and v.project_id = e.project_id
 		left join sessions s on s.id = v.session_id and s.project_id = v.project_id
-		where (e.id = ? or e.id like ? || '%')`
-	args := []any{idOrPrefix, idOrPrefix}
+		where e.id >= ? and e.id < ?`
+	// A range on the id index finds both the exact id and every id starting with the prefix.
+	// (An "id = ? or id like ?" condition made SQLite read every row: 204 ms per lookup at
+	// 100,000 records, measured in the Phase 1 scale run.)
+	args := []any{idOrPrefix, idOrPrefix + "\U0010FFFF"}
 	if !allProjects {
 		q += ` and e.project_id = ?`
 		args = append(args, projectID)
 	}
-	rows, err := s.db.QueryContext(ctx, q+` limit 2`, args...)
+	rows, err := s.db.QueryContext(ctx, q+` order by e.id limit 2`, args...)
 	if err != nil {
 		return Record{}, err
 	}
@@ -347,6 +350,11 @@ func (s *Store) GetEvidence(ctx context.Context, idOrPrefix, projectID string, a
 	}
 	if err := rows.Err(); err != nil {
 		return Record{}, err
+	}
+	for _, r := range out {
+		if r.ID == idOrPrefix {
+			return r, nil
+		}
 	}
 	switch len(out) {
 	case 0:
