@@ -19,6 +19,7 @@ import (
 
 	"sessionkeep/internal/capture"
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/fsx"
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/store"
 )
@@ -31,7 +32,10 @@ type Report struct {
 	DiscardedExclude int `json:"discarded_excluded"`
 	ProjectsCreated  int `json:"projects_created"`
 	GapsImported     int `json:"gaps_imported"`
-	Remaining        int `json:"remaining"`
+	// Deferred counts files left for the next drain because another program (typically antivirus
+	// scanning a file that was just written) held them open. Nothing is lost.
+	Deferred  int `json:"deferred"`
+	Remaining int `json:"remaining"`
 }
 
 // Deps are the things Drain needs. AfterCommit, if set, runs after each event's transaction has
@@ -104,12 +108,16 @@ func Drain(ctx context.Context, d Deps) (Report, error) {
 }
 
 func (d Deps) one(ctx context.Context, path, name string, rep *Report) error {
-	raw, err := os.ReadFile(path)
+	// fsx.ReadFile retries briefly: on Windows a file that was just created is often held open for
+	// a moment by a scanner. If it still cannot be read, leave it for the next drain rather than
+	// failing the whole run.
+	raw, err := fsx.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("read %s: %w", name, err)
+		rep.Deferred++
+		return nil
 	}
 	var ev capture.Event
 	if json.Unmarshal(raw, &ev) != nil || ev.Version != 1 || ev.EventID == "" || ev.SourceKey == "" || ev.SessionID == "" ||
@@ -182,7 +190,19 @@ func (d Deps) one(ctx context.Context, path, name string, rep *Report) error {
 			return err
 		}
 	}
-	return os.Remove(path)
+	// The event is committed. If the file cannot be removed right now, the next drain finds it,
+	// sees the event is already stored, and removes it then.
+	for i := 0; ; i++ {
+		err := os.Remove(path)
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if i >= 40 {
+			rep.Deferred++
+			return nil
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 func lastSegment(p string) string {

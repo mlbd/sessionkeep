@@ -1383,6 +1383,9 @@ func ingestCmd(inv invocation) error {
 	}
 	text := fmt.Sprintf("ingested %d, already stored %d, quarantined %d, discarded (excluded) %d, projects created %d, gaps imported %d\n",
 		rep.Ingested, rep.Replayed, rep.Quarantined, rep.DiscardedExclude, rep.ProjectsCreated, rep.GapsImported)
+	if rep.Deferred > 0 {
+		text += fmt.Sprintf("%d file(s) were busy (held open by another program) and are left for the next run; nothing is lost\n", rep.Deferred)
+	}
 	if err != nil {
 		inv.emit(rep, text)
 		return fmt.Errorf("drain stopped with %d file(s) left in the spool; they will be picked up by the next run: %w", rep.Remaining, err)

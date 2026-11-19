@@ -379,7 +379,9 @@ func TestConcurrentHooksAndDrains(t *testing.T) {
 	if err := <-drained; err != nil {
 		t.Fatal(err)
 	}
-	r.drain()
+	for i := 0; i < 50 && r.spoolFiles() > 0; i++ {
+		r.drain()
+	}
 	if failed.Load() != 0 {
 		var why []string
 		reasons.Range(func(k, _ any) bool { why = append(why, k.(string)); return true })
@@ -391,5 +393,36 @@ func TestConcurrentHooksAndDrains(t *testing.T) {
 	}
 	if r.spoolFiles() != 0 {
 		t.Fatalf("%d files left in the spool", r.spoolFiles())
+	}
+}
+
+// A spool file held open by another program (as antivirus does with newly written files) must not
+// fail the drain: the other files are stored, the busy one waits for the next run.
+func TestBusySpoolFileIsDeferredNotFatal(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("exclusive opens that block readers are a Windows behaviour")
+	}
+	r := newRig(t, "ask", "")
+	r.addProject(`c:\work\app`, "conversation")
+	first := r.hook("UserPromptSubmit", "s-1", `C:\Work\App`, map[string]any{"prompt": "held by a scanner"})
+	r.hook("UserPromptSubmit", "s-1", `C:\Work\App`, map[string]any{"prompt": "free"})
+
+	held, err := lockExclusive(first.SpoolFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := Drain(ctx, r.deps())
+	if err != nil {
+		t.Fatalf("a busy file failed the drain: %v", err)
+	}
+	if rep.Ingested != 1 || rep.Deferred != 1 || r.spoolFiles() != 1 {
+		t.Fatalf("with one file held: %+v, %d file(s) left", rep, r.spoolFiles())
+	}
+	held()
+	if rep := r.drain(); rep.Ingested != 1 || rep.Deferred != 0 || r.spoolFiles() != 0 {
+		t.Fatalf("after release: %+v", rep)
+	}
+	if got := r.q(`select count(*) from events`); got != "2" {
+		t.Fatalf("events=%s, want 2", got)
 	}
 }
