@@ -25,6 +25,11 @@ if [ -n "$user" ]; then
   if [ -n "$hits" ]; then echo "FAIL: personal path found in:"; echo "$hits"; fail=1; else echo ok; fi
 else echo "skipped: no user name in environment"; fi
 
+step "SQLite driver pin (ADR-0001)"
+want_sqlite=v1.62.0; want_libc=v1.80.1
+got_sqlite=$(go list -m -f '{{.Version}}' modernc.org/sqlite 2>/dev/null); got_libc=$(go list -m -f '{{.Version}}' modernc.org/libc 2>/dev/null)
+if [ "$got_sqlite" = "$want_sqlite" ] && [ "$got_libc" = "$want_libc" ]; then echo "ok ($got_sqlite, libc $got_libc)"; else echo "FAIL: modernc.org/sqlite=$got_sqlite libc=$got_libc; want $want_sqlite and $want_libc"; fail=1; fi
+
 step "gofmt"
 unformatted=$(gofmt -l cmd internal)
 if [ -n "$unformatted" ]; then echo "FAIL: not gofmt-clean:"; echo "$unformatted"; fail=1; else echo ok; fi
@@ -44,7 +49,7 @@ fi
 
 step "build (CGO-free) and smoke"
 mkdir -p bin
-CGO_ENABLED=0 go build -trimpath -o bin/sessionkeep.exe ./cmd/sessionkeep && ./bin/sessionkeep.exe version || fail=1
+CGO_ENABLED=0 go build -trimpath -o bin/sessionkeep.exe ./cmd/sessionkeep && ./bin/sessionkeep.exe version && ./bin/sessionkeep.exe doctor || fail=1
 
 echo
 if [ "$fail" = 0 ]; then echo "CHECK PASSED"; else echo "CHECK FAILED"; fi

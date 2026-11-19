@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 
 	"sessionkeep/internal/buildinfo"
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/store"
 )
 
 // Exit statuses (docs/09-INTERFACE_CONTRACTS.md). The hook entry point, added in a later slice,
@@ -27,6 +29,7 @@ const usage = `sessionkeep — local-first developer memory (pre-release; most f
 Usage:
   sessionkeep version [--json]   Show build information
   sessionkeep paths   [--json]   Show where SessionKeep keeps its data (creates nothing)
+  sessionkeep doctor  [--json]   Read-only checks: build, data location, SQLite engine gate
   sessionkeep help               Show this text
 
 Only the commands listed here exist. Environment: SESSIONKEEP_DATA_DIR overrides the data
@@ -86,6 +89,8 @@ func Run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		}
 		fmt.Fprintf(stdout, "data directory: %s (%s)\ndatabase:       %s\nspool:          %s\ncache:          %s\n", p.DataDir, p.Source, p.DBPath, p.SpoolDir, p.CacheDir)
 		return ExitOK
+	case "doctor":
+		return doctor(stdout, stderr, asJSON, getenv)
 	default:
 		return fail(stdout, stderr, asJSON, ExitUsage, "usage", fmt.Sprintf("unknown command %q; run `sessionkeep help`", cmd))
 	}
@@ -118,3 +123,51 @@ func fail(stdout, stderr io.Writer, asJSON bool, code int, machine, msg string) 
 	}
 	return code
 }
+
+type check struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // ok | failed
+	Detail string `json:"detail"`
+}
+
+// doctor runs read-only checks. It opens no database file and creates nothing; later slices add
+// checks for the spool, lease, database and plugin registration as those parts are built.
+func doctor(stdout, stderr io.Writer, asJSON bool, getenv func(string) string) int {
+	bi := buildinfo.Get()
+	checks := []check{{"build", "ok", fmt.Sprintf("sessionkeep %s %s/%s %s", bi.Version, bi.OS, bi.Arch, bi.Go)}}
+
+	if p, err := config.Resolve(runtime.GOOS, getenv); err != nil {
+		checks = append(checks, check{"data_location", "failed", err.Error()})
+	} else {
+		checks = append(checks, check{"data_location", "ok", fmt.Sprintf("%s (%s)", p.DataDir, p.Source)})
+	}
+
+	if e, err := store.ProbeEngine(context.Background()); err != nil {
+		checks = append(checks, check{"sqlite_engine", "failed", err.Error()})
+	} else if err := store.CheckEngine(e); err != nil {
+		checks = append(checks, check{"sqlite_engine", "failed", err.Error()})
+	} else {
+		checks = append(checks, check{"sqlite_engine", "ok", fmt.Sprintf("SQLite %s, FTS5 present, at or above %d.%d.%d", e.Version, store.MinSQLite[0], store.MinSQLite[1], store.MinSQLite[2])})
+	}
+
+	code := ExitOK
+	for _, c := range checks {
+		if c.Status != "ok" {
+			code = ExitFailure
+		}
+	}
+	if asJSON {
+		if emit(stdout, map[string]any{"healthy": code == ExitOK, "checks": checks, "not_checked": notChecked}) != ExitOK {
+			return ExitFailure
+		}
+		return code
+	}
+	for _, c := range checks {
+		fmt.Fprintf(stdout, "%-14s %-7s %s\n", c.Name, c.Status, c.Detail)
+	}
+	fmt.Fprintf(stdout, "not checked (not built yet): %s\n", notChecked)
+	return code
+}
+
+// notChecked is stated in every doctor report so a short list of passes is not read as full health.
+const notChecked = "database file, spool, ingest lease, capture hooks, plugin registration"

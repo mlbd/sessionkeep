@@ -97,9 +97,38 @@ func TestUnknownCommandAndArgument(t *testing.T) {
 
 // Commands that are not built must not appear to exist (docs/09: no command without a truthful capability).
 func TestUnbuiltCommandsAreRejected(t *testing.T) {
-	for _, c := range []string{"hook", "mcp", "start", "setup", "doctor", "memory", "review", "sync"} {
+	for _, c := range []string{"hook", "mcp", "start", "setup", "memory", "review", "sync"} {
 		if code, _, _ := run(t, nil, c); code != ExitUsage {
 			t.Fatalf("%q returned %d, want usage error", c, code)
 		}
+	}
+}
+
+func TestDoctorReportsEngineAndWhatItDidNotCheck(t *testing.T) {
+	code, out, _ := run(t, map[string]string{config.EnvDataDir: absDir()}, "doctor", "--json")
+	var got struct {
+		Data struct {
+			Healthy    bool
+			NotChecked string `json:"not_checked"`
+			Checks     []struct{ Name, Status, Detail string }
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("bad JSON: %v: %q", err, out)
+	}
+	if code != ExitOK || !got.Data.Healthy || len(got.Data.Checks) != 3 || got.Data.NotChecked == "" {
+		t.Fatalf("code=%d data=%+v", code, got.Data)
+	}
+	for _, c := range got.Data.Checks {
+		if c.Status != "ok" {
+			t.Errorf("check %s: %s (%s)", c.Name, c.Status, c.Detail)
+		}
+	}
+}
+
+func TestDoctorFailsWhenDataLocationIsUnusable(t *testing.T) {
+	code, out, _ := run(t, map[string]string{config.EnvDataDir: "relative"}, "doctor")
+	if code != ExitFailure || !strings.Contains(out, "data_location") || !strings.Contains(out, "failed") {
+		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
