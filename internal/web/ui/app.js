@@ -196,12 +196,24 @@ async function overview() {
     const models = [['sonnet', 'Sonnet (recommended)'], ['opus', 'Opus (uses more of your plan)'], ['haiku', 'Haiku (lightest)']];
     if (!models.some(m => m[0] === d.model)) models.push([d.model, d.model]);
     const model = select('summary-model', models, d.model);
+    const ac = await api('GET', '/api/accounts');
+    const list = ac.ok ? ac.data.accounts : [];
+    const chosen = list.find(a => a.chosen);
+    const acct = list.length > 1 ? select('summary-account', [['', 'Choose an account']].concat(list.map(a => [a.name, a.name + (a.command && a.command !== a.name ? ` (you start it with "${a.command}")` : '') + (a.last_used ? `, last used ${a.last_used}` : '')])), chosen ? chosen.name : '') : null;
     view.append(el('h2', { text: 'Session summaries' }),
       el('p', { class: 'quiet', text: d.enabled
         ? `${plural(d.summaries, 'summary', 'summaries')} written so far. ${d.requests_today} of ${d.daily_limit} requests used today. ${plural(d.sessions_waiting, 'finished session is', 'finished sessions are')} waiting.` + (d.program ? '' : ' Claude Code was not found on this computer, so none can be written.')
         : 'A summary makes an earlier session easier to find when you search with different words. It is kept apart from what was actually said, and marked as written by a model.' }),
-      el('div', { class: 'table' }, el('form', { onsubmit: e => { e.preventDefault(); act('/api/summaries', { enabled: on.value() === 'on', model: model.value }, 'Saved.'); } },
-        on, field('Model', model, 'Used only while summaries are on.'),
+      el('div', { class: 'table' }, el('form', { onsubmit: async e => {
+        e.preventDefault();
+        if (acct && acct.value && (!chosen || chosen.name !== acct.value)) {
+          const r = await api('POST', '/api/accounts', { name: acct.value });
+          if (!r.ok) return say(problem(r), 'bad');
+        }
+        act('/api/summaries', { enabled: on.value() === 'on', model: model.value }, 'Saved.');
+      } },
+        on, acct ? field('Claude Code account', acct, 'This computer has more than one. Summaries use the plan of the one you choose here; earlier sessions are imported from it too.') : null,
+        field('Model', model, 'Used only while summaries are on.'),
         el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Save this choice' })))));
   }
 }

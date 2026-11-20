@@ -1,16 +1,24 @@
 # First use
 
-SessionKeep 0.1.0 is installed for your Windows user. It saves nothing until you do steps 1 and 2.
+SessionKeep is installed for your Windows user. It saves nothing until you do steps 1 and 2.
 `sessionkeep` below means the installed program; either add its folder to your PATH or type the full
 path that `sessionkeep install` printed (`%LOCALAPPDATA%\Programs\SessionKeep\sessionkeep.exe`).
 
 ## 1. Turn it on in Claude Code
 
-    claude plugin marketplace add "%LOCALAPPDATA%\Programs\SessionKeep\claude-plugin"
-    claude plugin install sessionkeep@sessionkeep-local
+This computer has more than one Claude Code account, and SessionKeep is set to the one you use,
+which you start with your own short command instead of `claude`. Below, ACCOUNT stands for that
+command; `sessionkeep install` prints both lines with the real name filled in:
+
+    ACCOUNT plugin marketplace add "%LOCALAPPDATA%\Programs\SessionKeep\claude-plugin"
+    ACCOUNT plugin install sessionkeep@sessionkeep-local
 
 In PowerShell write `$env:LOCALAPPDATA` instead of `%LOCALAPPDATA%`. These two commands are the
 only change to Claude Code; SessionKeep never edits Claude Code settings itself. Restart Claude Code.
+
+The plugin is turned on per account. `sessionkeep account list` shows the accounts SessionKeep found,
+`sessionkeep account use NAME` changes which one it acts for (summaries, importing earlier sessions,
+and the commands it prints), and `sessionkeep install` prints the two commands again for that account.
 
 ## 2. Choose what is remembered
 
@@ -69,5 +77,5 @@ files, not claude-mem's database.
 ## Updating and removing
 
 - Update: build a new version and run `sessionkeep install` again from it.
-- Remove: `claude plugin uninstall sessionkeep@sessionkeep-local`, then `sessionkeep uninstall`
+- Remove: `ACCOUNT plugin uninstall sessionkeep@sessionkeep-local`, then `sessionkeep uninstall`
   (your data is kept unless you add `--purge-data`).

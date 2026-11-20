@@ -32,16 +32,17 @@ func TestMain(m *testing.M) {
 }
 
 type fakeCall struct {
-	Args  []string `json:"args"`
-	Stdin string   `json:"stdin"`
-	Guard string   `json:"guard"`
-	Cwd   string   `json:"cwd"`
+	Args   []string `json:"args"`
+	Stdin  string   `json:"stdin"`
+	Guard  string   `json:"guard"`
+	Cwd    string   `json:"cwd"`
+	Config string   `json:"config"`
 }
 
 func fakeClaude(mode string) int {
 	in, _ := io.ReadAll(os.Stdin)
 	cwd, _ := os.Getwd()
-	line, _ := json.Marshal(fakeCall{Args: os.Args[1:], Stdin: string(in), Guard: os.Getenv(summarize.GuardEnv), Cwd: cwd})
+	line, _ := json.Marshal(fakeCall{Args: os.Args[1:], Stdin: string(in), Guard: os.Getenv(summarize.GuardEnv), Cwd: cwd, Config: os.Getenv("CLAUDE_CONFIG_DIR")})
 	if f, err := os.OpenFile(os.Getenv("SESSIONKEEP_FAKE_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		f.Write(append(line, '\n'))
 		f.Close()

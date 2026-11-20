@@ -43,6 +43,15 @@ type Settings struct {
 	Exclusions []string `json:"exclusions"`
 	// Summaries is off unless the owner turned it on (`sessionkeep summarize on`).
 	Summaries Summaries `json:"summaries"`
+	// ClaudeAccount is which Claude Code sign-in SessionKeep acts for when the computer has several.
+	ClaudeAccount ClaudeAccount `json:"claude_account"`
+}
+
+// ClaudeAccount names a Claude Code configuration folder. Not chosen means: whichever one the
+// session at hand runs with. Chosen with an empty folder means Claude Code's own default.
+type ClaudeAccount struct {
+	Chosen    bool   `json:"chosen"`
+	ConfigDir string `json:"config_dir,omitempty"`
 }
 
 // Summaries controls the optional model-written session summaries. Turning it on means stored
@@ -92,6 +101,9 @@ func (s Settings) Validate() error {
 	}
 	if len(s.Summaries.Model) > 80 || s.Summaries.DailyLimit < 0 || s.Summaries.DailyLimit > MaxDailySummaries {
 		return fmt.Errorf("summaries.model must be at most 80 characters and summaries.daily_limit between 0 and %d", MaxDailySummaries)
+	}
+	if c := s.ClaudeAccount; c.ConfigDir != "" && (!c.Chosen || !(strings.HasPrefix(c.ConfigDir, "/") || (len(c.ConfigDir) > 2 && c.ConfigDir[1] == ':'))) {
+		return fmt.Errorf("claude_account.config_dir must be an absolute path and needs chosen=true (got %q)", c.ConfigDir)
 	}
 	if s.Summaries.Auto && !s.Summaries.Enabled {
 		return errors.New("summaries.auto needs summaries.enabled")

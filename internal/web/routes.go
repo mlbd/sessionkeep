@@ -216,6 +216,16 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	// Optional session summaries. Turning them on here is the owner's confirmation: the page
 	// says what it means next to the choice.
+	mux.HandleFunc("GET /api/accounts", func(w http.ResponseWriter, r *http.Request) { s.command(w, "account", "list") })
+	mux.HandleFunc("POST /api/accounts", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		s.command(w, "account", "use", "--", in.Name)
+	})
 	mux.HandleFunc("GET /api/summaries", func(w http.ResponseWriter, r *http.Request) { s.command(w, "summarize", "status") })
 	mux.HandleFunc("POST /api/summaries", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

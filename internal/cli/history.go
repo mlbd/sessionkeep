@@ -48,22 +48,17 @@ type historyCount struct {
 	Turns int    `json:"turns"`
 }
 
-// claudeDir is where Claude Code keeps its own files: --from, else CLAUDE_CONFIG_DIR, else ~/.claude.
-func claudeDir(inv invocation) string {
+// claudeDir is where Claude Code keeps its own files: --from, else the account the owner chose,
+// else the one this terminal runs with (CLAUDE_CONFIG_DIR), else ~/.claude.
+func claudeDir(inv invocation, st state) string {
 	if v := inv.flags["from"]; v != "" {
 		return v
 	}
-	if v := inv.getenv("CLAUDE_CONFIG_DIR"); v != "" {
-		return v
-	}
-	home := inv.getenv("HOME")
-	if runtime.GOOS == "windows" {
-		home = inv.getenv("USERPROFILE")
-	}
-	if home == "" {
+	if homeDir(inv.getenv) == "" && inv.getenv("CLAUDE_CONFIG_DIR") == "" && !st.settings.ClaudeAccount.Chosen {
 		return ""
 	}
-	return filepath.Join(home, ".claude")
+	a, _ := effectiveAccount(inv, st)
+	return a.ConfigDir
 }
 
 // historyCmd imports earlier Claude Code sessions for registered projects. Without --yes it
@@ -77,7 +72,11 @@ func historyCmd(inv invocation, rest []string) error {
 		return err
 	}
 	apply := inv.flags["yes"] != ""
-	dir := claudeDir(inv)
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	dir := claudeDir(inv, st)
 	if dir == "" {
 		return failErr("no_source", "cannot tell where Claude Code keeps its files; pass --from with its configuration folder")
 	}
@@ -89,10 +88,6 @@ func historyCmd(inv invocation, rest []string) error {
 		return failErr("no_source", "no Claude Code session folder at %s; pass --from with Claude Code's configuration folder", filepath.Join(dir, "projects"))
 	}
 	sort.Strings(files)
-	st, err := load(inv, true)
-	if err != nil {
-		return err
-	}
 	rep := historyReport{Imported: apply, Source: dir, Files: len(files), ParserVersion: history.ParserVersion}
 	err = withStore(st, func(ctx context.Context, s *store.Store) error {
 		var only store.Project

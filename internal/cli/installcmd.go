@@ -47,24 +47,34 @@ func installCmd(inv invocation) error {
 		return failErr("install_failed", "%v", err)
 	}
 	// Create the data directory and device id now, so the first session has nothing to set up.
-	if _, err := load(inv, true); err != nil {
+	st, err := load(inv, true)
+	if err != nil {
 		return err
+	}
+	acct, decided := effectiveAccount(inv, st)
+	which := ""
+	if n := len(accounts(inv, st)); n > 1 {
+		which = fmt.Sprintf("This computer has %d Claude Code accounts. These commands are for \"%s\"", n, acct.Name)
+		if !decided {
+			which += " (the one this terminal runs with; choose another with `sessionkeep account use NAME` and run install again)"
+		}
+		which += ". The plugin is turned on per account.\n\n"
 	}
 	text := fmt.Sprintf(`installed sessionkeep %s
 program: %s
 plugin:  %s
 
-No Claude Code setting was changed. To turn it on in Claude Code, run these two commands yourself:
+No Claude Code setting was changed. To turn it on in Claude Code, run these commands yourself:
 
-  claude plugin marketplace add "%s"
-  claude plugin install %s@%s
-
-To try it for a single session instead:  claude --plugin-dir "%s"
-
+%s%s
+To try it for a single session instead:
+%s
 Nothing is saved until you register a project (sessionkeep project add . --capture conversation)
 or choose automatic mode (sessionkeep setup --auto-add auto --level conversation).
 To use the short command name, add this folder to your PATH: %s
-`, rec.Version, rec.Binary, rec.PluginDir, rec.Marketplace, plugin.Name, install.MarketplaceName, rec.PluginDir, dir)
+`, rec.Version, rec.Binary, rec.PluginDir, which,
+		claudeLines(acct, "  ", fmt.Sprintf(`plugin marketplace add "%s"`, rec.Marketplace), fmt.Sprintf("plugin install %s@%s", plugin.Name, install.MarketplaceName)),
+		claudeLines(acct, "  ", fmt.Sprintf(`--plugin-dir "%s"`, rec.PluginDir)), dir)
 	return inv.emit(rec, text)
 }
 
@@ -135,7 +145,12 @@ func uninstallCmd(inv invocation) error {
 	} else {
 		fmt.Fprintf(&b, "your data was kept in %s\n", p.DataDir)
 	}
-	fmt.Fprintf(&b, "No Claude Code setting was changed. If you enabled the plugin there, remove it yourself:\n  claude plugin uninstall %s@%s\n  claude plugin marketplace remove %s\n", plugin.Name, install.MarketplaceName, install.MarketplaceName)
+	acct := account{Name: "claude", Command: "claude", Default: true}
+	if st, err := load(inv, false); err == nil {
+		acct, _ = effectiveAccount(inv, st)
+	}
+	fmt.Fprintf(&b, "No Claude Code setting was changed. If you enabled the plugin there, remove it yourself (in every account where you enabled it):\n%s",
+		claudeLines(acct, "  ", fmt.Sprintf("plugin uninstall %s@%s", plugin.Name, install.MarketplaceName), "plugin marketplace remove "+install.MarketplaceName))
 	return inv.emit(map[string]any{"removed": removed, "moved": moved, "data_kept": !purge, "data_dir": p.DataDir}, b.String())
 }
 

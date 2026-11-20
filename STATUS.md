@@ -17,6 +17,7 @@
 - **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`, `session list|show`.
 - **History:** `history import` brings in earlier Claude Code sessions of registered projects (preview unless `--yes`).
 - **Summaries (off by default, automatic when on):** `summarize status|on|off|run|delete` and a block on the dashboard Overview; written by the user's own `claude -p` from a detached background process, stored apart from original text, searched by `memory search`.
+- **Accounts:** `account list|use|auto` for computers with more than one Claude Code sign-in (D90).
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
 - **Surfaces:** generated Claude Code plugin with three skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
@@ -26,7 +27,7 @@
 
 - `sessionkeep 0.3.0` (commit `dabf4ea`) is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
-- **The plugin is not enabled in Claude Code.** The two `claude plugin` commands printed by `sessionkeep install` are the owner's step (D48). No auto-start entry exists.
+- **The plugin is not enabled in Claude Code.** The two commands printed by `sessionkeep install` are the owner's step (D48). The installed copy is set to the owner's active (second) account (D91). No auto-start entry exists.
 - claude-mem is untouched.
 
 ## What has not happened
@@ -62,7 +63,7 @@ Real daily use with the installed plugin; a full history import on real data and
 
 ## Blockers / awaiting owner
 
-1. Enable the plugin: run the two `claude plugin` commands (`docs/FIRST_USE.md`), then register projects.
+1. Enable the plugin: run the two plugin commands that `sessionkeep install` prints for the active account (`docs/FIRST_USE.md`), then register projects.
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
 4. Summaries are on in the installed copy (Sonnet). Say if Opus is wanted, or change it on the Overview page. Judge the quality of the first real summaries.

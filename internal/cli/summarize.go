@@ -44,6 +44,8 @@ type summarizeStatus struct {
 	Total      int    `json:"summaries"`
 	Waiting    int    `json:"sessions_waiting"`
 	Program    string `json:"program,omitempty"`
+	Account    string `json:"account"`
+	AccountSet bool   `json:"account_decided"`
 }
 
 type summarizeReport struct {
@@ -139,6 +141,8 @@ func summarizeCmd(inv invocation, rest []string) error {
 		out := summarizeStatus{Enabled: st.settings.Summaries.Enabled, Auto: st.settings.Summaries.Auto, Model: summaryModel(st.settings), DailyLimit: summaryLimit(st.settings)}
 		out.Program, _ = claudeProgram(inv.getenv)
 		out.AskedToday = requestsToday(st, time.Now())
+		acct, decided := effectiveAccount(inv, st)
+		out.Account, out.AccountSet = acct.Name, decided
 		ctx := context.Background()
 		if s, err := openRead(ctx, st); err == nil {
 			defer s.Close()
@@ -158,12 +162,16 @@ func summarizeCmd(inv invocation, rest []string) error {
 				state = "on, written only when you run `sessionkeep summarize run`"
 			}
 		}
+		acctWords := out.Account
+		if !out.AccountSet {
+			acctWords = "not chosen: whichever account a session runs with pays (here: " + out.Account + "); choose with `sessionkeep account use NAME`"
+		}
 		prog := out.Program
 		if prog == "" {
 			prog = "not found on PATH"
 		}
-		return inv.emit(out, fmt.Sprintf("summaries: %s\nmodel: %s; at most %d request(s) a day (%d made today)\nstored: %d; finished sessions without a current summary: %d\nClaude Code program: %s\n",
-			state, out.Model, out.DailyLimit, out.AskedToday, out.Total, out.Waiting, prog))
+		return inv.emit(out, fmt.Sprintf("summaries: %s\nmodel: %s; at most %d request(s) a day (%d made today)\nstored: %d; finished sessions without a current summary: %d\nClaude Code program: %s\nClaude Code account: %s\n",
+			state, out.Model, out.DailyLimit, out.AskedToday, out.Total, out.Waiting, prog, acctWords))
 
 	case "on":
 		if err := inv.only("model", "daily-limit", "manual", "yes"); err != nil {
@@ -172,6 +180,14 @@ func summarizeCmd(inv invocation, rest []string) error {
 		st, err := load(inv, true)
 		if err != nil {
 			return err
+		}
+		acct, decided := effectiveAccount(inv, st)
+		if !decided {
+			var names []string
+			for _, a := range accounts(inv, st) {
+				names = append(names, a.Name)
+			}
+			return failErr("account_not_chosen", "this computer has more than one Claude Code account (%s). Say whose plan pays for summaries first: sessionkeep account use NAME", strings.Join(names, ", "))
 		}
 		next := st.settings
 		next.Summaries.Enabled = true
@@ -197,12 +213,13 @@ func summarizeCmd(inv invocation, rest []string) error {
   - When a session is over, SessionKeep gives its stored text (secrets already removed) to the Claude
     Code program on this computer, which sends it to Anthropic under your own sign-in. SessionKeep
     holds no key and connects to nothing itself.
-  - Model: %s. Each summary is one request and uses your plan's limits. At most %d a day.
+  - Model: %s. Each summary is one request and uses the plan of the Claude Code account
+    "%s". At most %d a day.
   - Written %s.
   - Only projects that save conversation text and are not paused. Excluded folders hold no text.
   - The model gets no tools. Its summary is stored on this computer, marked as written by a model.
     It never replaces the original text and is never treated as an instruction.
-`, summaryModel(next), summaryLimit(next), when)
+`, summaryModel(next), acct.Name, summaryLimit(next), when)
 		if inv.flags["yes"] == "" {
 			inv.emit(map[string]any{"changed": false, "would_set": next.Summaries}, text+"NOTHING CHANGED. Run the same command with --yes to turn summaries on.\n")
 			return &cmdError{ExitNeedsConsent, "confirmation_required", "summaries are still off; add --yes to confirm"}
@@ -367,7 +384,8 @@ func summarizeRun(inv invocation, st state, projectKey string, limit int, dry bo
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return rep, err
 	}
-	run := summarize.ClaudeCLI(bin, dir, os.Environ())
+	acct, _ := effectiveAccount(inv, st)
+	run := summarize.ClaudeCLI(bin, dir, accountEnv(acct, os.Environ()))
 
 	asked := 0
 	for _, c := range candidates {

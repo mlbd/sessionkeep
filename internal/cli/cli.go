@@ -87,6 +87,9 @@ Usage:
                                    through your own Claude Code sign-in. Off unless you turn it
                                    on; "summarize on" explains what that means before it changes
                                    anything
+  sessionkeep account list | use NAME | auto
+                                   Which Claude Code sign-in SessionKeep acts for when this computer
+                                   has more than one (summaries, history import, printed commands)
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
   sessionkeep forget record ID | captured --project P | project P   [--yes]
@@ -325,6 +328,8 @@ func dispatch(inv invocation) error {
 		return historyCmd(inv, rest)
 	case "summarize":
 		return summarizeCmd(inv, rest)
+	case "account":
+		return accountCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":

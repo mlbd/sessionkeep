@@ -99,6 +99,28 @@ partial matches. No session file was created in Claude Code's folder for the sum
 Additional checks: `TestStartDetachedDoesNotWait` (a real detached process; the call returns
 before the process finishes), `TestBackgroundSummariesRunByThemselvesAndBackOffAfterAFailure`.
 
+## 4a. Several Claude Code accounts (D90)
+
+The owner pointed out that this computer has two Claude Code accounts and that the active one is
+started with a different command. The three real requests of section 4 ran under the active
+account only because the agent's own session runs with it and the variable was inherited; from
+the dashboard or a plain terminal they would have gone to the unused account.
+
+| Rule | Check (`internal/cli/account_test.go`, sandbox home, no real folder read) | Result |
+|---|---|---|
+| One account: nothing is asked, `claude` is printed | `TestOneAccountNeedsNoChoice` | pass |
+| Accounts are the `~/.claude*` folders that hold `projects`; look-alikes are ignored | three found, two decoys ignored | pass |
+| The short command is found from a script on PATH; a script for a longer folder name or one that sets nothing is not taken | `work` found, `workshop` and `notes` not | pass |
+| `summarize on` refuses while several exist and none is chosen | exit and message | pass |
+| `install` and `uninstall` print the account's command, or a line selecting its folder when no short command exists | output | pass |
+| A summary runs with the chosen account's folder, whatever the surrounding process has; with the default chosen the variable is removed | recorded by the stand-in; mutation makes the test fail | pass |
+| History is imported from the chosen account's folder | preview count | pass |
+
+Not verified: a real request made from a process that does not already run with the chosen
+account (the mechanism is the same environment variable Claude Code documents); scripts written
+as shell aliases or PowerShell functions, which cannot be found on PATH (the printed commands
+then select the folder explicitly).
+
 ## 5. Not verified
 
 - An interactive (not `-p`) session ending while the detached process runs, and closing the
