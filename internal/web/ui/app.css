@@ -76,6 +76,8 @@ p { margin: 0 0 12px; max-width: 70ch; }
 .small { font-size: .9rem; }
 
 #notice { min-height: 1.6em; margin: 14px 0 4px; font-weight: 600; }
+/* A message stays in view while the page is scrolled, so a button far down still gets its answer. */
+#notice:not(:empty) { position: sticky; top: 10px; z-index: 5; padding: 9px 14px; background: var(--sheet); border: 1.5px solid var(--rule); border-radius: 7px; box-shadow: 0 4px 14px rgba(20, 33, 58, .12); }
 #notice.bad { color: var(--madder); }
 #notice.ok { color: var(--teal); }
 
@@ -124,6 +126,13 @@ button.danger:hover { background: var(--madder-soft); }
 button.link { border: 0; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; font-weight: 400; }
 button.link:hover { background: transparent; color: var(--saffron); }
 button:disabled { opacity: .5; cursor: default; }
+button.busy { opacity: .8; cursor: progress; }
+button.busy::before { content: ""; display: inline-block; width: .8em; height: .8em; margin-right: .55em; vertical-align: -.08em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: turn .7s linear infinite; }
+@keyframes turn { to { transform: rotate(360deg); } }
+.working { display: grid; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1.5px dashed var(--rule); border-radius: 7px; color: var(--slate); }
+.working .bar { position: relative; display: block; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+.working .bar::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; border-radius: 2px; background: var(--saffron); animation: weft 1.25s ease-in-out infinite; }
+@keyframes weft { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 
 /* choice tiles: every option visible with what it means */
 fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }

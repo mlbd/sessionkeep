@@ -13,7 +13,7 @@ function el(tag, props = {}, ...children) {
   for (const [k, v] of Object.entries(props)) {
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
-    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), k === 'onclick' || k === 'onsubmit' ? busyWhile(v) : v);
     else if (v === true) node.setAttribute(k, '');
     else if (v !== false && v != null) node.setAttribute(k, v);
   }
@@ -22,6 +22,28 @@ function el(tag, props = {}, ...children) {
     node.append(c.nodeType ? c : document.createTextNode(String(c)));
   }
   return node;
+}
+
+// While a click or a submitted form is still being worked on, its button turns in place and
+// cannot be pressed again. A handler takes part by returning its promise.
+function busyWhile(handler) {
+  return function (e) {
+    const r = handler.call(this, e);
+    if (!r || typeof r.then !== 'function') return r;
+    const btn = e.type === 'submit' ? (e.submitter || e.currentTarget.querySelector('button[type=submit]')) : e.currentTarget;
+    if (!btn || btn.disabled) return r;
+    btn.disabled = true;
+    btn.classList.add('busy');
+    btn.setAttribute('aria-busy', 'true');
+    const done = () => { btn.disabled = false; btn.classList.remove('busy'); btn.removeAttribute('aria-busy'); };
+    r.then(done, done);
+    return r;
+  };
+}
+
+// A moving bar with a sentence, shown where the result will appear.
+function working(text) {
+  return el('div', { class: 'working' }, el('span', { class: 'bar', 'aria-hidden': 'true' }), el('span', { text }));
 }
 
 function say(text, kind = '') {
@@ -251,7 +273,7 @@ async function projectsView() {
   const name = el('input', { type: 'text', id: 'add-name', autocomplete: 'off' });
   const level = choice('add-level', 'What to save', LEVELS, '');
   view.append(el('h2', { text: 'Add a project' }), el('div', { class: 'table' },
-    el('form', { onsubmit: e => { e.preventDefault(); act('/api/projects', { path: path.value, level: level.value(), name: name.value }, 'Project added.'); } },
+    el('form', { onsubmit: e => { e.preventDefault(); return act('/api/projects', { path: path.value, level: level.value(), name: name.value }, 'Project added.'); } },
       field('Folder', path, 'The full path. Everything inside it counts as this project.'), level,
       field('Name', name, 'Optional. The folder name is used if you leave this empty.'),
       el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Add project' })))));
@@ -265,7 +287,7 @@ async function projectsView() {
   ], a.mode);
   const autoLevel = choice('auto-level', 'For automatically added folders, save', LEVELS.slice(0, 3), a.level || '');
   view.append(el('h2', { text: 'Folders SessionKeep has not seen' }), el('div', { class: 'table' },
-    el('form', { onsubmit: e => { e.preventDefault(); act('/api/settings/auto-add', { mode: mode.value(), level: mode.value() === 'auto' ? autoLevel.value() : '' }, 'Saved.'); } },
+    el('form', { onsubmit: e => { e.preventDefault(); return act('/api/settings/auto-add', { mode: mode.value(), level: mode.value() === 'auto' ? autoLevel.value() : '' }, 'Saved.'); } },
       mode, autoLevel,
       el('p', { class: 'hint', text: 'With automatic adding, any folder you open Claude Code in is saved unless it is excluded below. Exclude client or private folders first.' }),
       el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Save this choice' })))));
@@ -278,7 +300,7 @@ async function projectsView() {
       el('div', { class: 'row' }, el('p', { class: 'path', text: p }),
         el('button', { type: 'button', class: 'link', text: 'Stop excluding', 'aria-label': `Stop excluding ${p}`, onclick: () => act('/api/exclusions', { path: p, remove: true }, 'No longer excluded.') })))))
       : el('p', { class: 'quiet', text: 'No folders are excluded.' }),
-    el('div', { class: 'table' }, el('form', { onsubmit: e => { e.preventDefault(); act('/api/exclusions', { path: ex.value }, 'Excluded.'); } },
+    el('div', { class: 'table' }, el('form', { onsubmit: e => { e.preventDefault(); return act('/api/exclusions', { path: ex.value }, 'Excluded.'); } },
       field('Folder to exclude', ex), el('div', {}, el('button', { type: 'submit', text: 'Exclude this folder' })))));
 
   // Earlier sessions: check first, import only after the numbers were shown.
@@ -292,9 +314,10 @@ async function projectsView() {
   ];
   const importHistory = async confirm => {
     say('Reading Claude Code’s session files. This can take a minute.');
+    found.replaceChildren(working(confirm ? 'Importing earlier sessions. This can take a minute.' : 'Reading Claude Code’s session files. This can take a minute.'));
     const r = await api('POST', '/api/history/import', { confirm });
     if (r.ok) { found.replaceChildren(el('div', { class: 'preview' }, describe(r.data))); return say('Earlier sessions imported.', 'ok'); }
-    if (r.status !== 409 || !r.data) return say(problem(r), 'bad');
+    if (r.status !== 409 || !r.data) { found.replaceChildren(); return say(problem(r), 'bad'); }
     say('Nothing is imported yet.');
     found.replaceChildren(el('div', { class: 'preview' }, describe(r.data),
       r.data.turns ? el('button', { type: 'button', class: 'primary', text: 'Import these sessions', onclick: () => importHistory(true) }) : null));
@@ -400,7 +423,7 @@ async function searchView() {
     }
     if (d.next_cursor) results.append(el('p', {}, el('button', { type: 'button', text: 'Show more results', onclick: e => { e.target.parentNode.remove(); run(d.next_cursor); } })));
   };
-  view.append(el('form', { role: 'search', class: 'searchbox', onsubmit: e => { e.preventDefault(); run(''); } },
+  view.append(el('form', { role: 'search', class: 'searchbox', onsubmit: e => { e.preventDefault(); return run(''); } },
     field('Words to look for', q),
     el('div', { class: 'row' }, field('In', proj), field('Said by', who), el('label', { class: 'inline' }, exact, 'Match the exact phrase'),
       el('button', { type: 'submit', class: 'primary', text: 'Search' }))), results);
@@ -447,7 +470,7 @@ async function instructionsView() {
     say(problem(res), 'bad');
   };
   view.append(el('h2', { text: 'Add an instruction' }), el('div', { class: 'table' },
-    el('form', { onsubmit: e => { e.preventDefault(); submit(false); } },
+    el('form', { onsubmit: e => { e.preventDefault(); return submit(false); } },
       field('What should Claude always know or do', text, 'Your own words. They are saved and repeated exactly.'), scope, field('Project', proj),
       el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Check before saving' })))), preview);
   if (retired.length) view.append(el('details', {}, el('summary', { text: `Retired instructions (${retired.length})` }), el('ul', { class: 'threads' }, retired.map(row))));
@@ -468,7 +491,7 @@ async function instructionsView() {
     work.replaceChildren(el('div', { class: 'preview' },
       el('h3', { text: action === 'archive' ? 'Retire this instruction?' : 'Change the wording' }),
       el('p', { class: 'said', text: i.text }),
-      el('form', { onsubmit: e => { e.preventDefault(); go(); } },
+      el('form', { onsubmit: e => { e.preventDefault(); return go(); } },
         action === 'supersede' ? field('New wording', t) : null, field('Why', reason, 'Optional. Kept with the history.'),
         el('div', { class: 'row' }, el('button', { type: 'submit', class: 'primary', text: action === 'archive' ? 'Retire it' : 'Save the new wording' }),
           el('button', { type: 'button', text: 'Leave it as it is', onclick: () => work.replaceChildren() })))));
