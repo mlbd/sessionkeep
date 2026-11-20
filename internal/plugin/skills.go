@@ -51,7 +51,8 @@ To record a fact you checked:
 - Categories decide when a re-check is due: security and price (1 day), quota (3 days), policy and release (7 days), api (14 days), framework (30 days), concept (180 days).
 - When a fact changed, record the new one with --supersedes <old id>. Do not withdraw the old one separately.
 - A fact you could not find a source for can be recorded without --url and --quote. It is stored as NOT VERIFIED; say so to the user.
-- Check that the page is about the version the project actually uses (look at the lock file or the installed version). A page about the newest version does not verify a claim about an older one; say which version in --applies-to.
+- Check that the page is about the version the project actually uses (look at the lock file or the installed version). A page about the newest version does not verify a claim about an older one; say which version in --applies-to. Write it as package@version when the fact is about a library or a runtime (react@18, next@14.2, go@1.22): SessionKeep then compares it with the project's lock file each time the fact is shown.
+- A fact shown with NOT ABOUT THIS PROJECT'S VERSION was checked for another major version than the project uses. Do not apply it here without finding the page for the project's version.
 - Do not put passwords, keys, tokens or the project's own code in a statement, a quote or a URL.
 
 If a command answers that fetching is off, tell the user: it stays off until they run SESSIONKEEP research on, which explains what is sent. Do not turn it on yourself. If a source cannot be reached, say so; do not fill the gap from memory.

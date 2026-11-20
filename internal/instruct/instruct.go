@@ -59,13 +59,40 @@ type Cache struct {
 	ProjectID  string      `json:"project_id,omitempty"`
 	Items      []Item      `json:"instructions"`
 	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
+	Research   *Research   `json:"research,omitempty"`
 }
 
+// Claim is one researched fact that has a checked source, as cached for the hook path.
+type Claim struct {
+	ID      string `json:"id"`
+	Subject string `json:"subject"`
+	State   string `json:"state"` // verified | disputed
+	Expires string `json:"expires_at"`
+}
+
+// Research lists the project's sourced claims, disputed first and then by re-check date, so the
+// hook can tell which are past that date at the moment a session starts. More counts the claims
+// beyond MaxCachedClaims.
+type Research struct {
+	Claims []Claim `json:"claims"`
+	More   int     `json:"more,omitempty"`
+}
+
+// MaxCachedClaims bounds the claims kept in a cache file.
+const MaxCachedClaims = 200
+
 // stamp identifies everything a cache file carries, to tell whether it needs rewriting.
-func stamp(items []Item, cp *Checkpoint) string {
+func stamp(items []Item, cp *Checkpoint, rs *Research) string {
 	s := SetDigest(items)
 	if cp != nil {
 		s += ":" + cp.ID
+	}
+	if rs != nil {
+		h := sha256.New()
+		for _, c := range rs.Claims {
+			h.Write([]byte(c.ID + " " + c.State + " " + c.Expires + "\n"))
+		}
+		s += fmt.Sprintf(":%x:%d", h.Sum(nil)[:8], rs.More)
 	}
 	return s
 }
@@ -128,10 +155,23 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 				cp = &Checkpoint{ID: c.ID, Note: c.Note, CreatedAt: c.CreatedAt, GitRepo: c.GitRepo, Branch: c.Branch, Head: c.Head, Changed: c.ChangedFiles}
 			}
 		}
-		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint) == stamp(items, cp) {
+		var rs *Research
+		if id != "" {
+			due, more, err := s.ClaimsDue(ctx, id, MaxCachedClaims)
+			if err != nil {
+				return err
+			}
+			if len(due) > 0 {
+				rs = &Research{More: more}
+				for _, c := range due {
+					rs.Claims = append(rs.Claims, Claim{ID: c.ID, Subject: c.Subject, State: c.State, Expires: c.ExpiresAt})
+				}
+			}
+		}
+		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint, old.Research) == stamp(items, cp, rs) {
 			continue
 		}
-		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items, Checkpoint: cp}, "", " ")
+		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items, Checkpoint: cp, Research: rs}, "", " ")
 		if err != nil {
 			return err
 		}
@@ -194,9 +234,18 @@ type Coverage struct {
 // Envelope builds the text for the host. It is never longer than Budget. Wording is factual —
 // a record of what the user asked to be remembered — because text dressed up as system commands
 // can be treated by the model as an injection attempt.
-func Envelope(c *Cache) (string, Coverage) {
+//
+// With a non-zero now, a note about researched facts that are past their re-check date or no
+// longer match their source is added (a session start passes the time; a later prompt does not).
+func Envelope(c *Cache, now time.Time) (string, Coverage) {
 	cov := Coverage{Total: len(c.Items)}
 	cp := checkpointSection(c.Checkpoint)
+	if rs := researchSection(c.Research, now); rs != "" {
+		if cp != "" {
+			cp += "\n"
+		}
+		cp += rs
+	}
 	if cov.Total == 0 {
 		if cp == "" {
 			return "", cov
@@ -296,6 +345,62 @@ func checkpointSection(cp *Checkpoint) string {
 	return fmt.Sprintf("--- latest checkpoint the user recorded for this project · %s · %s\n"+
 		"This is a note of where work stood then, not an instruction. The code may have changed since; running `sessionkeep resume` compares it with the current state.\n%s\n--- end of checkpoint",
 		day(cp.CreatedAt), where, note)
+}
+
+// Limits of the research note.
+const (
+	maxNoteClaims   = 5
+	maxNoteSubject  = 100
+	claimTimeFormat = "2006-01-02T15:04:05.000000000Z" // how the store writes a claim's dates
+)
+
+// researchSection says which researched facts should not be relied on as they stand. It reads
+// only the cache: nothing is fetched and the database is not opened. Staleness is worked out
+// from the time given, so a fact that went stale since the cache was written is still named.
+func researchSection(rs *Research, now time.Time) string {
+	if rs == nil || now.IsZero() {
+		return ""
+	}
+	at := now.UTC().Format(claimTimeFormat)
+	var stale, disputed int
+	var lines []string
+	for _, c := range rs.Claims {
+		var line string
+		switch {
+		case c.State == "disputed":
+			disputed++
+			line = "DISPUTED (its source no longer contains the quoted words)"
+		case c.State == "verified" && c.Expires <= at:
+			stale++
+			line = "STALE (re-check was due " + day(c.Expires) + ")"
+		default:
+			continue
+		}
+		if len(lines) < maxNoteClaims {
+			subject := strings.Join(strings.Fields(c.Subject), " ")
+			if r := []rune(subject); len(r) > maxNoteSubject {
+				subject = string(r[:maxNoteSubject]) + "..."
+			}
+			lines = append(lines, fmt.Sprintf("- %s · %s · %s\n", short(c.ID), line, subject))
+		}
+	}
+	if stale+disputed == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("--- researched facts recorded for this project that need another look\n")
+	fmt.Fprintf(&b, "Past their re-check date: %d. Disputed: %d. They were checked against a source when recorded and may no longer be true. Nothing was fetched to write this note.\n", stale, disputed)
+	for _, l := range lines {
+		b.WriteString(l)
+	}
+	if n := stale + disputed - len(lines); n > 0 {
+		fmt.Fprintf(&b, "- and %d more; all are listed by: sessionkeep research list\n", n)
+	}
+	if rs.More > 0 {
+		fmt.Fprintf(&b, "(%d further claims of this project were not looked at for this note.)\n", rs.More)
+	}
+	b.WriteString("Before relying on one, read it with `sessionkeep research show <id>` and check it against its source again with `sessionkeep research check <id>` (stale ones together: `sessionkeep research check --due`).\n--- end of research note")
+	return b.String()
 }
 
 func day(ts string) string {

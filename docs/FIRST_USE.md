@@ -92,7 +92,11 @@ it is shown as STALE until it is checked again; if the words are gone from the p
 as DISPUTED.
 
 You do not run anything: the plugin's `research` skill tells Claude to look at these facts before
-relying on one, and to record what it looks up. In a terminal:
+relying on one, and to record what it looks up. When a session starts in a project that has
+stale or disputed facts, Claude is told which ones (nothing is fetched for that). The dashboard's
+Research page shows every fact with its page and quote, and lets you check one again or withdraw
+it. A fact recorded for a named version (`react@17`) is compared with the version in the
+project's lock file and says so when the project uses another major version. In a terminal:
 
     sessionkeep research status
     sessionkeep research list

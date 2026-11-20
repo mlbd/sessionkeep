@@ -487,3 +487,85 @@ func TestDashboardTurnsThePluginOnAndOffForAnAccount(t *testing.T) {
 		t.Fatalf("unknown account: %d %+v", code, r.Error)
 	}
 }
+
+// The Research page lists a project's facts with status, date, source and quote, and its two
+// buttons run the same commands as the terminal.
+func TestDashboardShowsAndChecksResearchedFacts(t *testing.T) {
+	sb := newSandbox(t)
+	site, app, forward := sb.research(true)
+	os.WriteFile(filepath.Join(app, "go.mod"), []byte("module x\n\ngo 1.22.4\n"), 0o600)
+	sb.ok("research", "record", refundClaim, "--subject", "<b>refund</b> API", "--category", "api", "--applies-to", "go@2",
+		"--url", site.url, "--quote", "at most 100 items per call", "--project", app)
+	b := signIn(t, sb)
+	type claim struct {
+		ID, Status, Subject, Statement string
+		Verified                       string `json:"verified_at"`
+		Evidence                       []struct {
+			Quote   string
+			FoundIn struct{ URL string } `json:"found_in"`
+		}
+		Version struct{ Result string } `json:"version_check"`
+	}
+	type reply struct {
+		Data struct {
+			Claims  []claim
+			Checked []claim
+			Counts  struct{ Verified, Stale, Disputed int }
+		}
+		Error struct{ Code, Message string }
+	}
+	list := func(extra string) reply {
+		var r reply
+		if code := b.do("GET", "/api/research?project="+url.QueryEscape(app)+extra, nil, nil, &r); code != 200 {
+			t.Fatalf("list: %d %+v", code, r.Error)
+		}
+		return r
+	}
+	r := list("")
+	if len(r.Data.Claims) != 1 || r.Data.Counts.Verified != 1 {
+		t.Fatalf("list: %+v", r.Data)
+	}
+	c := r.Data.Claims[0]
+	if c.Status != "verified" || c.Subject != "<b>refund</b> API" || c.Verified == "" || len(c.Evidence) != 1 || c.Evidence[0].Quote != "at most 100 items per call" ||
+		c.Evidence[0].FoundIn.URL != site.url || c.Version.Result != "other_major" {
+		t.Fatalf("claim as sent to the page: %+v", c)
+	}
+	// Listing fetches nothing; the check button fetches once and reports what it found.
+	forward(15 * 24 * time.Hour)
+	before := site.requests()
+	if r := list(""); r.Data.Claims[0].Status != "stale" || r.Data.Counts.Stale != 1 || site.requests() != before {
+		t.Fatalf("stale claim: %+v (requests %d)", r.Data, site.requests()-before)
+	}
+	site.set(strings.Replace(docsV1, "at most 100 items", "at most 50 items", 1), `"v2"`, 0)
+	var done reply
+	if code := b.do("POST", "/api/research/"+c.ID+"/check", map[string]any{"project": app}, nil, &done); code != 200 || len(done.Data.Checked) != 1 || done.Data.Checked[0].Status != "disputed" {
+		t.Fatalf("check: %d %+v", code, done)
+	}
+	if site.requests() != before+1 {
+		t.Fatalf("check made %d requests", site.requests()-before)
+	}
+	if code := b.do("POST", "/api/research/"+c.ID+"/withdraw", map[string]any{"project": app, "reason": "no longer needed"}, nil, &done); code != 200 {
+		t.Fatalf("withdraw: %d %+v", code, done.Error)
+	}
+	if r := list(""); len(r.Data.Claims) != 0 {
+		t.Fatalf("a withdrawn fact is still listed: %+v", r.Data.Claims)
+	}
+	if r := list("&all=1"); len(r.Data.Claims) != 1 || r.Data.Claims[0].Status != "withdrawn" {
+		t.Fatalf("with withdrawn facts: %+v", r.Data.Claims)
+	}
+	// Only the two actions exist, and an id that looks like an option is taken as an id.
+	if code := b.do("POST", "/api/research/"+c.ID+"/record", map[string]any{"project": app}, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("unknown action: %d", code)
+	}
+	done = reply{}
+	if code := b.do("POST", "/api/research/--due/check", map[string]any{"project": app}, nil, &done); code != http.StatusUnprocessableEntity || done.Error.Code != "not_found" {
+		t.Fatalf("option-like id: %d %+v", code, done.Error)
+	}
+	// With fetching off the check is refused and nothing is requested.
+	sb.ok("research", "off")
+	before = site.requests()
+	done = reply{}
+	if code := b.do("POST", "/api/research/"+c.ID+"/check", map[string]any{"project": app}, nil, &done); code == 200 || done.Error.Code != "research_off" || site.requests() != before {
+		t.Fatalf("check with fetching off: %d %+v", code, done.Error)
+	}
+}

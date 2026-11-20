@@ -1,9 +1,10 @@
 # Project status
 
-**Last updated:** 2026-11-21 (session 18) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.8.0 installed on the owner's computer through the npm package, plugin turned on in the owner's active Claude Code account (D107); no session has run with it yet** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-21 (session 19) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.9.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
+- `evidence/phase-3/P3-B.md` — session 19: session-start note for stale facts, Research page, version comparison with lock files.
 - `evidence/npm/N-A.md` — session 18: the npm package, the plugin step, sandbox and real install runs.
 - `evidence/phase-3/P3-A.md` — session 17: claims with a checked source, safe page fetching, staleness; what is not built yet.
 - `evidence/phase-2/P2-C.md` — session 16: import speed measured and improved; secret removal made 37 times faster with equivalence checks.
@@ -20,28 +21,38 @@
 - **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`, `session list|show`.
 - **History:** `history import` brings in earlier Claude Code sessions of registered projects (preview unless `--yes`).
 - **Summaries (off by default, automatic when on):** `summarize status|on|off|run|delete` and a block on the dashboard Overview; written by the user's own `claude -p` from a detached background process, stored apart from original text, searched by `memory search`.
-- **Research (fetching off by default):** `research status|on|off|fetch|record|list|search|show|check|withdraw`; a claim is verified only by a quote SessionKeep found on a page it fetched, goes stale by category, and is disputed when the quote disappears.
-- **Accounts:** `account list|use|auto` for computers with more than one Claude Code sign-in (D90).
+- **Research (fetching off by default):** `research status|on|off|fetch|record|list|search|show|check|withdraw`; a claim is verified only by a quote SessionKeep found on a page it fetched, goes stale by category, and is disputed when the quote disappears. Stale and disputed claims are named at session start; `--applies-to PACKAGE@VERSION` is compared with the project's lock file.
+- **Accounts:** `account list|use|auto|plugins|enable|disable` for computers with more than one Claude Code sign-in (D90, D111).
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
-- **Surfaces:** generated Claude Code plugin with four skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
+- **Surfaces:** generated Claude Code plugin with four skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Research, Pick up work, Health).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
 - **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0006.
 
 ## State of the owner's computer
 
-- `sessionkeep 0.8.0` is installed by `npm install -g dist/sessionkeep-0.8.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
-- The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
+- `sessionkeep 0.9.0` is installed by `npm install -g dist/sessionkeep-0.9.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- The data directory exists with default settings (unregistered folders: ask). The owner registered projects from the dashboard on 2026-11-21; an import preview there reported 4 sessions "already saved as they happened".
 - **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local`, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
 
 ## What has not happened
 
-- No real Claude Code session has run with the plugin yet (it was turned on during session 18; Claude Code must be restarted). No real import of earlier sessions has been run (only a preview that stored nothing).
-- The owner has not seen the redesigned dashboard.
+- Whether the owner ran the real import of earlier sessions is not known to the agent (a preview was seen: 71 sessions).
+- The owner uses the dashboard but has not said whether the redesign is what was wanted (D73). The agent has not looked at the pages added since session 15 (accounts section, Research page) in a browser.
+- No researched fact has been recorded in a real session yet, so the session-start note and the Research page have only been seen by tests.
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 18, 2026-11-20)
+## Latest session record (session 19, 2026-11-21)
+
+- Agent: Claude Code (claude-fable-5-2). Owner: "Let's move next."
+- Built Phase 3 part B (P3-06, rest of P3-03). Record: `evidence/phase-3/P3-B.md`. Decisions D112–D114.
+- `bash scripts/check.sh` → **CHECK PASSED** before the commit. One failure on the way: the page showed a version warning by colour without the word `text:` the accessibility test looks for; fixed.
+- Nine rules broken on purpose; each made a test fail.
+- No page was fetched from the internet and no `claude -p` request was made.
+- Not built: scheduled re-checks (P3-05), search providers (P3-04), contradicting sources, MCP tools for research, lock files in sub-folders.
+
+## Session 18 record (2026-11-20)
 
 - Agent: Claude Code (claude-fable-5-2). Owner asked whether SessionKeep can be installed with npm and set up behind the scenes, then: "go with your recommendation, build it locally first".
 - Built the npm package (not published) and `sessionkeep install --enable-plugin`. Record: `evidence/npm/N-A.md`. Decisions D105–D110; D48 and D65 changed by the owner (D107).
@@ -51,7 +62,6 @@
 - Owner tried the dashboard: the import button gave no sign of working (the status line was off-screen). Fixed in 0.7.1: buttons show a turning ring while they work, the import shows a moving bar in place, the status line stays in view. Not looked at in a browser by the agent.
 - 2026-11-21, owner's first real use: projects added from the dashboard, import preview correct (71 sessions found; 4 sessions "already saved as they happened", so live capture works); the plugin's four skills are listed in a live session.
 - Owner asked for an easy way to turn SessionKeep on for his other account. Built in 0.8.0 (D111): Overview section "Claude Code accounts" and `sessionkeep account plugins | enable | disable`. Tests: `TestThePluginIsTurnedOnAndOffPerAccount`, `TestDashboardTurnsThePluginOnAndOffForAnAccount` (mock Claude Code); four rules broken on purpose, each caught. Real, read-only: `account plugins` on the owner's computer answered in 2 s (default account off, active account on). Not done by the agent: turning it on in the default account (the owner's click), and looking at the new section in a browser.
-- Phase 3 part B was not started; it is still the next task.
 
 ## Session 17 record (2026-11-20)
 
@@ -90,18 +100,18 @@ Real daily use with the installed plugin; a full history import on real data and
 
 ## Blockers / awaiting owner
 
-1. Restart Claude Code so the plugin loads, then register projects (`sessionkeep project add . --capture conversation`, or automatic mode). Nothing is saved before that.
+1. Use it in real sessions and report capture gaps and recall misses. Restart the dashboard to see the pages of 0.9.0.
 1a. npm package: decide whether and under which name and licence to publish it (D106). macOS and Linux builds have never been run.
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
 4. Summaries are on in the installed copy (Sonnet). Say if Opus is wanted, or change it on the Overview page. Judge the quality of the first real summaries.
 4a. Phase 2 remainder (accepted as open, D94): fact versioning needs a design decision; a local embedding model needs a download and an ADR; claude-mem database import needs a schema and licence review.
 5. D66: auto-start through the per-user logon list.
-6. Phase 3 part A: confirm or overrule D98 (robots.txt not consulted), D103 (fetching on in the installed copy), D104 (one real page fetched by the agent).
+6. Phase 3: confirm or overrule D98 (robots.txt not consulted), D103 (fetching on in the installed copy), D104 (one real page fetched by the agent), D113 (which lock files are read and how `--applies-to` must be written).
 
 ## Next smallest task and acceptance checks
 
-Phase 3 part B: (1) a line at session start when a project has stale or disputed claims, and a Research page on the dashboard (P3-06); acceptance: a stale claim is announced once per session start without any fetch, and the page shows status, date, source and quote as escaped text. (2) `--applies-to` compared with the version found in the project's lock file for the common ecosystems (P3-03); acceptance: a claim about another major version is labelled as not matching. Then P3-05 (bounded, opt-in scheduled re-checks) and P3-04 (search providers) only by owner decision. After the owner's first real sessions, capture gaps and recall misses come first.
+Owner decision needed before more of Phase 3: P3-05 (re-checks on a schedule; today nothing is fetched unless a command or a click asks) and P3-04 (search providers; needs a provider, a key and consent). Without that decision the next task is what real use turns up: capture gaps and recall misses first. Smallest open item inside Phase 3 that needs no decision: read-only research tools in the MCP server (list, search, show); acceptance: another project's claims are never returned, and no tool fetches.
 
 ## Update template
 

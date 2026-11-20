@@ -320,3 +320,142 @@ func TestOnlySourcedClaimsCanBeChecked(t *testing.T) {
 		}
 	}
 }
+
+// A session is told at its start, and only then, which researched facts are past their re-check
+// date or disputed. The note comes from the cache file alone: no page is fetched for it.
+func TestSessionStartNamesStaleAndDisputedClaimsWithoutFetching(t *testing.T) {
+	sb := newSandbox(t)
+	site, app, forward := sb.research(true)
+	other := sb.dir("other")
+	sb.ok("project", "add", other, "--capture", "conversation")
+
+	// Recorded "now" by the real clock, which is what the hook goes by: current, so no note.
+	forward(time.Since(time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)))
+	if code, _, errOut := sb.record(site, app, "at most 100 items per call"); code != ExitOK {
+		t.Fatalf("record: %d %s", code, errOut)
+	}
+	if ctx := sb.inject("SessionStart", "s1", app); ctx != "" {
+		t.Fatalf("a current claim must not produce a note:\n%s", ctx)
+	}
+	sb.ok("research", "withdraw", sb.claims(app)[0].ID, "--project", app)
+
+	// Recorded thirty days ago: the api category is good for 14 days, so it is stale today.
+	forward(-30 * 24 * time.Hour)
+	if code, _, errOut := sb.record(site, app, "at most 100 items per call"); code != ExitOK {
+		t.Fatalf("record: %d %s", code, errOut)
+	}
+	id := sb.claims(app)[0].ID
+	before := site.requests()
+	ctx := sb.inject("SessionStart", "s2", app)
+	for _, want := range []string{"Past their re-check date: 1. Disputed: 0.", id[:8] + " · STALE", "payments refund API", "Nothing was fetched", "sessionkeep research check"} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("note lacks %q:\n%s", want, ctx)
+		}
+	}
+	if strings.Contains(ctx, refundClaim) {
+		t.Fatalf("the note must name the claim, not repeat it as if it were current:\n%s", ctx)
+	}
+	if site.requests() != before {
+		t.Fatalf("the session start fetched a page (%d requests)", site.requests()-before)
+	}
+	// Once per session start: a later prompt in the session does not repeat it, another project never gets it.
+	if ctx := sb.inject("UserPromptSubmit", "s2", app); ctx != "" {
+		t.Fatalf("the note was repeated with a prompt:\n%s", ctx)
+	}
+	if ctx := sb.inject("SessionStart", "s3", other); ctx != "" {
+		t.Fatalf("another project received the note:\n%s", ctx)
+	}
+	// With instructions present the note comes after them, and a prompt that re-sends changed instructions leaves it out.
+	sb.remember("project", "Use ISO dates.", "--project", app)
+	if ctx := sb.inject("SessionStart", "s4", app); !strings.Contains(ctx, "Use ISO dates.") || !strings.Contains(ctx, "STALE") {
+		t.Fatalf("instructions and note together:\n%s", ctx)
+	}
+	if ctx := sb.inject("UserPromptSubmit", "s5", app); !strings.Contains(ctx, "Use ISO dates.") || strings.Contains(ctx, "STALE") {
+		t.Fatalf("a prompt carries instructions only:\n%s", ctx)
+	}
+
+	// The quote disappears from the page: after a check the note says disputed.
+	site.set(strings.Replace(docsV1, "at most 100 items", "at most 50 items", 1), `"v2"`, 0)
+	forward(30 * 24 * time.Hour)
+	sb.ok("research", "check", id, "--project", app)
+	if ctx := sb.inject("SessionStart", "s6", app); !strings.Contains(ctx, "Past their re-check date: 0. Disputed: 1.") || !strings.Contains(ctx, id[:8]+" · DISPUTED") {
+		t.Fatalf("disputed claim not announced:\n%s", ctx)
+	}
+	// Withdrawn claims are no longer mentioned.
+	sb.ok("research", "withdraw", id, "--project", app)
+	if ctx := sb.inject("SessionStart", "s7", app); strings.Contains(ctx, "researched facts") {
+		t.Fatalf("a withdrawn claim is still announced:\n%s", ctx)
+	}
+}
+
+// --applies-to written as package@version is compared with the project's lock file every time
+// the claim is shown; a claim about another major version says so.
+func TestAClaimAboutAnotherMajorVersionIsLabelled(t *testing.T) {
+	sb := newSandbox(t)
+	_, app, _ := sb.research(false)
+	rec := func(applies string) string {
+		var out struct {
+			Data struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		args := []string{"research", "record", "Hooks need a function component.", "--subject", "react hooks", "--category", "framework", "--project", app, "--json"}
+		if applies != "" {
+			args = append(args, "--applies-to", applies)
+		}
+		if err := json.Unmarshal([]byte(sb.ok(args...)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Data.ID
+	}
+	show := func(id string) (string, string) {
+		var out struct {
+			Data struct {
+				Check *struct {
+					Result    string   `json:"result"`
+					Installed []string `json:"installed"`
+					File      string   `json:"file"`
+				} `json:"version_check"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(sb.ok("research", "show", id, "--project", app, "--json")), &out); err != nil {
+			t.Fatal(err)
+		}
+		text := sb.ok("research", "show", id, "--project", app)
+		if out.Data.Check == nil {
+			return "", text
+		}
+		return out.Data.Check.Result, text
+	}
+	old, same, plan, none := rec("react@17"), rec("react@18"), rec("the Pro plan"), rec("")
+
+	if r, text := show(old); r != "not_found" || !strings.Contains(text, "version not compared") {
+		t.Fatalf("no lock file yet: %q\n%s", r, text)
+	}
+	lock := filepath.Join(app, "package-lock.json")
+	if err := os.WriteFile(lock, []byte(`{"packages":{"node_modules/react":{"version":"18.3.1"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r, text := show(old); r != "other_major" || !strings.Contains(text, "NOT ABOUT THIS PROJECT'S VERSION") || !strings.Contains(text, "react 18.3.1 (package-lock.json)") {
+		t.Fatalf("another major version: %q\n%s", r, text)
+	}
+	if r, text := show(same); r != "match" || strings.Contains(text, "NOT ABOUT") {
+		t.Fatalf("same major version: %q\n%s", r, text)
+	}
+	for _, id := range []string{plan, none} {
+		if r, text := show(id); r != "" || strings.Contains(text, "version") {
+			t.Fatalf("free text is not compared: %q\n%s", r, text)
+		}
+	}
+	// The list carries the same label, and the project moving on changes the answer without re-recording.
+	if list := sb.ok("research", "list", "--project", app); strings.Count(list, "NOT ABOUT THIS PROJECT'S VERSION") != 1 {
+		t.Fatalf("list:\n%s", list)
+	}
+	os.WriteFile(lock, []byte(`{"packages":{"node_modules/react":{"version":"17.0.2"}}}`), 0o600)
+	if r, _ := show(old); r != "match" {
+		t.Fatalf("after the project changed version: %q", r)
+	}
+	if r, _ := show(same); r != "other_major" {
+		t.Fatalf("after the project changed version: %q", r)
+	}
+}

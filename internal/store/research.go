@@ -71,6 +71,17 @@ type Claim struct {
 	CreatedAt    string          `json:"created_at"`
 	Evidence     []ClaimEvidence `json:"evidence"`
 	LastChecks   []ClaimCheck    `json:"last_checks,omitempty"`
+	// VersionCheck compares AppliesTo with the version the project uses. The store never fills it.
+	VersionCheck *VersionCheck `json:"version_check,omitempty"`
+}
+
+// VersionCheck is the outcome of comparing a claim's "applies to" with the project's lock files.
+type VersionCheck struct {
+	Package   string   `json:"package"`
+	Claimed   string   `json:"claimed"`
+	File      string   `json:"file,omitempty"`
+	Installed []string `json:"installed,omitempty"`
+	Result    string   `json:"result"` // match | other_version | other_major | mixed | not_found
 }
 
 // NewEvidence is a quote together with the fetch it was found in. IDs are supplied by the caller.
@@ -397,4 +408,37 @@ func (s *Store) CountClaims(ctx context.Context, projectID string, now time.Time
 		coalesce(sum(state = 'disputed'),0), coalesce(sum(state = 'candidate'),0) from claims where project_id = ?2`, now.UTC().Format(stamp), projectID).
 		Scan(&c.Verified, &c.Stale, &c.Disputed, &c.Candidate)
 	return c, err
+}
+
+// ClaimDue is the little a session-start note needs to know about one sourced claim. Whether a
+// verified claim is stale is worked out from ExpiresAt by whoever reads it.
+type ClaimDue struct {
+	ID        string `json:"id"`
+	Subject   string `json:"subject"`
+	State     string `json:"state"` // verified | disputed
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ClaimsDue returns a project's verified and disputed claims, disputed first and then the ones
+// whose re-check date comes soonest, at most limit of them, and how many more there are.
+func (s *Store) ClaimsDue(ctx context.Context, projectID string, limit int) ([]ClaimDue, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx, `select count(*) from claims where project_id = ? and state in ('verified','disputed')`, projectID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.db.QueryContext(ctx, `select id, subject, state, coalesce(expires_at,'') from claims where project_id = ? and state in ('verified','disputed')
+		order by case state when 'disputed' then 0 else 1 end, expires_at, seq limit ?`, projectID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []ClaimDue
+	for rows.Next() {
+		var c ClaimDue
+		if err := rows.Scan(&c.ID, &c.Subject, &c.State, &c.ExpiresAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, c)
+	}
+	return out, total - len(out), rows.Err()
 }

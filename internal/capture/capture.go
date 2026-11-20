@@ -230,14 +230,22 @@ func recallContext(req Request, session string, d project.Decision) []byte {
 		// Do not let a damaged file look like "the user recorded nothing".
 		return respond("SessionKeep is a local memory tool this user installed. The user's recorded instructions could not be read in this session (the local cache file is damaged). Their content is not known here; the user can repair it by running: sessionkeep setup")
 	}
-	if cache == nil || (len(cache.Items) == 0 && cache.Checkpoint == nil) {
+	if cache == nil {
 		return nil
 	}
 	digest := instruct.SetDigest(cache.Items)
 	if req.HookEvent == "UserPromptSubmit" && instruct.AlreadySent(req.Paths, session, digest) {
 		return nil
 	}
-	text, _ := instruct.Envelope(cache)
+	// The note about stale researched facts is given once, when the session starts.
+	var at time.Time
+	if req.HookEvent == "SessionStart" {
+		at = req.Now
+	}
+	text, _ := instruct.Envelope(cache, at)
+	if text == "" {
+		return nil
+	}
 	instruct.MarkSent(req.Paths, session, digest)
 	return respond(text)
 }

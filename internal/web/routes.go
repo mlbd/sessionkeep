@@ -244,6 +244,37 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		s.command(w, "account", verb, "--", in.Name)
 	})
+	// Researched facts. Listing reads only what is stored and the project's lock files. "check"
+	// fetches the fact's source page again; it is the owner's click and is refused while
+	// fetching is turned off.
+	mux.HandleFunc("GET /api/research", func(w http.ResponseWriter, r *http.Request) {
+		args := []string{"research", "list", flag("project", r.URL.Query().Get("project")), flag("limit", "200")}
+		if r.URL.Query().Get("all") == "1" {
+			args = append(args, "--all")
+		}
+		s.command(w, args...)
+	})
+	mux.HandleFunc("POST /api/research/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Project string `json:"project"`
+			Reason  string `json:"reason"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		args := []string{"research", r.PathValue("action"), flag("project", in.Project)}
+		switch r.PathValue("action") {
+		case "check":
+		case "withdraw":
+			if in.Reason != "" {
+				args = append(args, flag("reason", in.Reason))
+			}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		s.command(w, append(args, "--", r.PathValue("id"))...)
+	})
 	mux.HandleFunc("GET /api/summaries", func(w http.ResponseWriter, r *http.Request) { s.command(w, "summarize", "status") })
 	mux.HandleFunc("POST /api/summaries", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

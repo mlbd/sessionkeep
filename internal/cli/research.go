@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -32,6 +33,8 @@ const researchUsage = `usage: sessionkeep research status
                                [--url URL --quote "EXACT WORDS FROM THE PAGE"] [--supersedes ID] [--project P]
              With --url and --quote the page is fetched and the claim is stored as verified only
              if the quote is on it. Without them it is stored as a candidate (not verified).
+             --applies-to written as PACKAGE@VERSION (react@18, go@1.22) is compared with the
+             version in the project's lock file whenever the claim is shown.
        sessionkeep research list [--all] [--project P]
        sessionkeep research search "WORDS" [--project P]
        sessionkeep research show ID [--project P]
@@ -116,6 +119,21 @@ func claimText(c store.Claim) string {
 	if c.AppliesTo != "" {
 		fmt.Fprintf(&b, "  applies to: %s\n", c.AppliesTo)
 	}
+	if v := c.VersionCheck; v != nil {
+		uses := fmt.Sprintf("this project uses %s %s (%s)", v.Package, strings.Join(v.Installed, " and "), v.File)
+		switch v.Result {
+		case "match":
+			fmt.Fprintf(&b, "  version: %s, which is the version the claim is about\n", uses)
+		case "other_major":
+			fmt.Fprintf(&b, "  NOT ABOUT THIS PROJECT'S VERSION: the claim is about %s %s, %s. Another major version can behave differently\n", v.Package, v.Claimed, uses)
+		case "other_version":
+			fmt.Fprintf(&b, "  DIFFERENT VERSION: the claim is about %s %s, %s\n", v.Package, v.Claimed, uses)
+		case "mixed":
+			fmt.Fprintf(&b, "  SEVERAL VERSIONS: the claim is about %s %s, %s; it does not fit all of them\n", v.Package, v.Claimed, uses)
+		case "not_found":
+			fmt.Fprintf(&b, "  version not compared: %s is not in this project's lock files (looked for: %s)\n", v.Package, strings.Join(research.LockFiles, ", "))
+		}
+	}
 	if c.Note != "" {
 		fmt.Fprintf(&b, "  note: %s\n", c.Note)
 	}
@@ -131,6 +149,41 @@ func claimText(c store.Claim) string {
 }
 
 func short(id string) string { return id[:min(8, len(id))] }
+
+// versionChecks compares each claim's "applies to" with the version the project uses, when it
+// names a package and a version. It reads lock files in the project's folders and nothing else.
+func versionChecks(roots []string, claims ...*store.Claim) {
+	type found struct {
+		file     string
+		versions []string
+	}
+	seen := map[string]found{}
+	for _, c := range claims {
+		name, version, ok := research.ParseAppliesTo(c.AppliesTo)
+		if !ok {
+			continue
+		}
+		f, done := seen[name]
+		if !done {
+			for _, root := range roots {
+				if f.file, f.versions = research.Installed(root, name); f.file != "" {
+					break
+				}
+			}
+			seen[name] = f
+		}
+		v := &store.VersionCheck{Package: name, Claimed: version, File: f.file, Installed: f.versions, Result: "not_found"}
+		for i, installed := range f.versions {
+			r, _ := research.CompareVersions(version, installed)
+			if i == 0 {
+				v.Result = r
+			} else if r != v.Result {
+				v.Result = "mixed"
+			}
+		}
+		c.VersionCheck = v
+	}
+}
 
 func researchCmd(inv invocation, rest []string) error {
 	if len(rest) == 0 {
@@ -285,8 +338,11 @@ Run "sessionkeep research on --yes" to turn it on; "sessionkeep research off" tu
 				}
 				n.Supersedes = old.ID
 			}
-			saved, err = s.AddClaim(ctx, n)
-			return claimErr(err, inv.flags["supersedes"])
+			if saved, err = s.AddClaim(ctx, n); err != nil {
+				return claimErr(err, inv.flags["supersedes"])
+			}
+			versionChecks(proj.Roots, &saved)
+			return nil
 		})
 		if err != nil {
 			return err
@@ -301,6 +357,11 @@ Run "sessionkeep research on --yes" to turn it on; "sessionkeep research off" tu
 		if sub == "search" {
 			f.Query = args[0]
 		}
+		if v := inv.flags["limit"]; v != "" {
+			if f.Limit, err = strconv.Atoi(v); err != nil || f.Limit < 1 || f.Limit > 1000 {
+				return usageErr("--limit must be a number from 1 to 1000")
+			}
+		}
 		var list []store.Claim
 		var counts store.ClaimCounts
 		err = withStore(st, func(ctx context.Context, s *store.Store) error {
@@ -312,6 +373,9 @@ Run "sessionkeep research on --yes" to turn it on; "sessionkeep research off" tu
 				return err
 			}
 			list, err = s.Claims(ctx, proj.ID, f, researchNow())
+			for i := range list {
+				versionChecks(proj.Roots, &list[i])
+			}
 			return err
 		})
 		if err != nil {
@@ -357,9 +421,12 @@ Run "sessionkeep research on --yes" to turn it on; "sessionkeep research off" tu
 				if err := s.WithdrawClaim(ctx, proj.ID, c.ID, reason); err != nil {
 					return err
 				}
-				c, err = s.Claim(ctx, proj.ID, c.ID, researchNow())
+				if c, err = s.Claim(ctx, proj.ID, c.ID, researchNow()); err != nil {
+					return err
+				}
 			}
-			return err
+			versionChecks(proj.Roots, &c)
+			return nil
 		})
 		if err != nil {
 			return claimErr(err, args[0])
@@ -382,12 +449,14 @@ Run "sessionkeep research on --yes" to turn it on; "sessionkeep research off" tu
 // records what was found. The database is not held while pages are fetched.
 func researchCheck(inv invocation, st state, args []string, claimErr func(error, string) error) error {
 	var todo []store.Claim
+	var roots []string
 	more := 0
 	err := withStore(st, func(ctx context.Context, s *store.Store) error {
 		proj, err := resolveProject(ctx, inv, st, s, inv.flags["project"])
 		if err != nil {
 			return err
 		}
+		roots = proj.Roots
 		if len(args) == 1 {
 			c, err := s.Claim(ctx, proj.ID, args[0], researchNow())
 			if err != nil {
@@ -459,6 +528,7 @@ func researchCheck(inv invocation, st state, args []string, claimErr func(error,
 		}); err != nil {
 			return claimErr(err, c.ID)
 		}
+		versionChecks(roots, &got)
 		after = append(after, got)
 		b.WriteString(claimText(got) + "\n")
 	}

@@ -537,6 +537,84 @@ async function instructionsView() {
   }
 }
 
+// ---- Research -------------------------------------------------------------------------------
+
+const CLAIM_STATE = {
+  verified: ['on', 'state-ok', c => `Checked against its source on ${when(c.verified_at).slice(0, 10)}. Check again after ${when(c.expires_at).slice(0, 10)}.`],
+  stale: ['paused', 'state-warn', c => `Out of date. Last checked on ${when(c.verified_at).slice(0, 10)}; it should have been checked again by ${when(c.expires_at).slice(0, 10)}.`],
+  disputed: ['bad', 'state-bad', c => `Disputed. The page no longer contains the quoted words (last checked ${when(c.verified_at).slice(0, 10)}).`],
+  candidate: ['off', 'state-off', () => 'Not checked. It was written down without a source.'],
+  withdrawn: ['off', 'state-off', () => 'Withdrawn.'],
+  superseded: ['off', 'state-off', () => 'Replaced by a newer fact.'],
+};
+
+function versionLine(v) {
+  if (!v) return null;
+  const uses = `this project uses ${v.package} ${(v.installed || []).join(' and ')} (${v.file})`;
+  const words = {
+    match: `Version: ${uses}, which is the version this fact is about.`,
+    other_major: `Not about this project's version: the fact is about ${v.package} ${v.claimed}, ${uses}.`,
+    other_version: `Different version: the fact is about ${v.package} ${v.claimed}, ${uses}.`,
+    mixed: `Several versions: the fact is about ${v.package} ${v.claimed}, ${uses}.`,
+    not_found: `Version not compared: ${v.package} is not in this project's lock files.`,
+  }[v.result];
+  return words ? el('p', { class: v.result === 'match' || v.result === 'not_found' ? 'quiet small' : 'state-warn', text: words }) : null;
+}
+
+async function researchView() {
+  const pr = await loadProjects();
+  if (!pr.ok) return say(problem(pr), 'bad');
+  lede.textContent = 'Facts about the outside world that Claude looked up, each with the page and the exact words that back it.';
+  if (!projects.length) return view.append(el('p', { class: 'quiet', text: 'Add a project first; facts are kept per project.' }));
+  const proj = projectSelect('rproject', false);
+  const closed = el('input', { type: 'checkbox', id: 'closed' });
+  const list = el('div', { 'aria-live': 'polite' });
+  const load = async () => {
+    const r = await api('GET', `/api/research?project=${encodeURIComponent(proj.value)}${closed.checked ? '&all=1' : ''}`);
+    if (!r.ok) { list.replaceChildren(); return say(problem(r), 'bad'); }
+    const n = r.data.counts, claims = r.data.claims || [];
+    const act = async (c, action, body, done) => {
+      const res = await api('POST', `/api/research/${encodeURIComponent(c.id)}/${action}`, { project: proj.value, ...body });
+      if (!res.ok) return say(problem(res), 'bad');
+      await load();
+      say(done(res.data), 'ok');
+    };
+    list.replaceChildren(
+      el('p', { class: 'quiet', text: `${plural(n.verified, 'fact is', 'facts are')} checked and current, ${n.stale} out of date, ${n.disputed} disputed, ${n.candidate} not checked.` }),
+      claims.length ? el('ul', { class: 'threads' }, claims.map(c => {
+        const [strand, cls, words] = CLAIM_STATE[c.status] || CLAIM_STATE.candidate;
+        const sourced = c.state === 'verified' || c.state === 'disputed';
+        const open = c.state !== 'withdrawn' && c.state !== 'superseded';
+        const failed = (c.last_checks || []).filter(k => k.result === 'unavailable');
+        return el('li', { class: 'thread' }, el('span', { class: 'strand ' + strand }), el('div', {},
+          el('h3', { text: c.subject }),
+          el('p', { class: cls, text: words(c) }),
+          el('p', { class: 'said', text: c.statement }),
+          c.applies_to ? el('p', { class: 'quiet small', text: 'Applies to: ' + c.applies_to }) : null,
+          versionLine(c.version_check),
+          c.note ? el('p', { class: 'quiet small', text: 'Note: ' + c.note }) : null,
+          (c.evidence || []).map(e => el('div', { class: 'quote' },
+            el('p', { class: 'said', text: '\u201c' + e.quote + '\u201d' }),
+            el('p', { class: 'path' }, 'From ', e.found_in.url.startsWith('https:') ? el('a', { href: e.found_in.url, rel: 'noopener noreferrer', target: '_blank', text: e.found_in.url }) : e.found_in.url,
+              `, read on ${when(e.last_confirmed_in.fetched_at).slice(0, 10)}.`))),
+          failed.length ? el('p', { class: 'state-warn', text: `The last check on ${when(failed[0].checked_at).slice(0, 10)} could not reach the page (${failed[0].detail}).` }) : null,
+          el('p', { class: 'quiet small', text: `${c.category} · ${c.id.slice(0, 8)}` }),
+          open ? el('div', { class: 'row' },
+            sourced ? el('button', { type: 'button', text: 'Check the page again', 'aria-label': `Check the page again for: ${c.subject}`,
+              onclick: () => act(c, 'check', {}, d => { const s = ((d.checked || [])[0] || {}).status; return s === 'verified' ? 'The page still says so.' : s === 'disputed' ? 'The page no longer contains the quoted words.' : 'The page could not be reached; nothing changed.'; }) }) : null,
+            el('button', { type: 'button', class: 'link', text: 'Withdraw', 'aria-label': `Withdraw the fact: ${c.subject}`,
+              onclick: () => act(c, 'withdraw', { reason: 'withdrawn from the dashboard' }, () => 'Withdrawn. It is kept, marked as withdrawn.') })) : null));
+      })) : el('p', { class: 'quiet', text: 'No facts are recorded for this project. Claude records them when it looks something up with the research skill.' }));
+    if (notice.textContent === 'Loading...') say('');
+  };
+  proj.onchange = load;
+  closed.onchange = load;
+  view.append(el('div', { class: 'row' }, field('Project', proj), el('label', { class: 'inline' }, closed, 'Also show withdrawn and replaced facts')),
+    el('p', { class: 'quiet small', text: '"Check the page again" opens the page from this computer. It works only while fetching is turned on (sessionkeep research on).' }),
+    list);
+  await load();
+}
+
 // ---- Pick up work ---------------------------------------------------------------------------
 
 async function resumeView() {
@@ -591,7 +669,7 @@ async function diagnostics() {
 // ---- Routing --------------------------------------------------------------------------------
 
 const views = { overview: ['Overview', overview], projects: ['Projects', projectsView], history: ['History', historyView], search: ['Search', searchView],
-  instructions: ['Instructions', instructionsView], resume: ['Pick up work', resumeView], diagnostics: ['Health', diagnostics] };
+  instructions: ['Instructions', instructionsView], research: ['Research', researchView], resume: ['Pick up work', resumeView], diagnostics: ['Health', diagnostics] };
 let current = 'overview';
 
 async function show(route) {

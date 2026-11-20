@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 
 	"sessionkeep/internal/config"
@@ -32,7 +33,7 @@ func TestEnvelopeCarriesEveryInstructionVerbatimWhenTheyFit(t *testing.T) {
 	for i, tx := range texts {
 		c.Items = append(c.Items, item(i, "project", tx))
 	}
-	env, cov := Envelope(c)
+	env, cov := Envelope(c, time.Time{})
 	if cov != (Coverage{Total: 6, Shown: 6}) {
 		t.Fatalf("coverage %+v", cov)
 	}
@@ -55,7 +56,7 @@ func TestEnvelopeCarriesEveryInstructionVerbatimWhenTheyFit(t *testing.T) {
 }
 
 func TestEmptySetProducesNoEnvelope(t *testing.T) {
-	if env, cov := Envelope(&Cache{Version: 1}); env != "" || cov.Total != 0 {
+	if env, cov := Envelope(&Cache{Version: 1}, time.Time{}); env != "" || cov.Total != 0 {
 		t.Fatalf("%q %+v", env, cov)
 	}
 }
@@ -67,7 +68,7 @@ func TestOverBudgetSetIsReportedNeverSilentlyCut(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		c.Items = append(c.Items, item(i, "project", fmt.Sprintf("instruction-%02d ", i)+strings.Repeat("x", 900)))
 	}
-	env, cov := Envelope(c)
+	env, cov := Envelope(c, time.Time{})
 	if size(env) > Budget {
 		t.Fatalf("envelope is %d units, over the budget of %d", size(env), Budget)
 	}
@@ -106,7 +107,7 @@ func TestOneOversizedInstructionDoesNotHideTheOthers(t *testing.T) {
 		item(1, "project", "small one"),
 		item(2, "project", "another small one"),
 	}}
-	env, cov := Envelope(c)
+	env, cov := Envelope(c, time.Time{})
 	if cov.Shown != 2 || cov.Omitted != 1 || !strings.Contains(env, "small one\n") || !strings.Contains(env, "--- not shown: 00000000") || size(env) > Budget {
 		t.Fatalf("coverage %+v size %d", cov, size(env))
 	}
@@ -119,7 +120,7 @@ func TestSetTooLargeToEvenList(t *testing.T) {
 	for i := 0; i < 400; i++ {
 		c.Items = append(c.Items, item(i, "project", strings.Repeat("y", 300)))
 	}
-	env, cov := Envelope(c)
+	env, cov := Envelope(c, time.Time{})
 	if size(env) > Budget || cov.Unlisted == 0 || cov.Shown+cov.Omitted != 400 ||
 		!strings.Contains(env, fmt.Sprintf("--- and %d more not listed", cov.Unlisted)) || !strings.Contains(env, "Active instructions: 400.") {
 		t.Fatalf("coverage %+v size %d", cov, size(env))
@@ -131,7 +132,7 @@ func TestBudgetCountsUTF16Units(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		c.Items = append(c.Items, item(i, "project", strings.Repeat("🚀", 500))) // 500 runes, 1,000 UTF-16 units each
 	}
-	env, cov := Envelope(c)
+	env, cov := Envelope(c, time.Time{})
 	if size(env) > Budget || cov.Shown >= 12 || cov.Shown < 6 {
 		t.Fatalf("coverage %+v, %d units", cov, size(env))
 	}
@@ -206,7 +207,7 @@ func TestEnvelopeCarriesTheLatestCheckpointWithinTheBudget(t *testing.T) {
 	cp := &Checkpoint{ID: "cp-1", Note: "Export job drafted.\nNext: retries.", CreatedAt: "2026-11-19T10:00:00Z", GitRepo: true, Branch: "main", Head: "0123456789abcdef", Changed: 2}
 
 	// A checkpoint alone still reaches the session.
-	env, cov := Envelope(&Cache{Version: 1, WrittenAt: "t", Checkpoint: cp})
+	env, cov := Envelope(&Cache{Version: 1, WrittenAt: "t", Checkpoint: cp}, time.Time{})
 	if cov.Total != 0 || !strings.Contains(env, "Export job drafted.\nNext: retries.") || !strings.Contains(env, "branch main at 0123456789, 2 uncommitted file(s)") ||
 		!strings.Contains(env, "not an instruction") || !strings.Contains(env, "No standing instructions are recorded") {
 		t.Fatalf("checkpoint-only envelope:\n%s", env)
@@ -217,19 +218,65 @@ func TestEnvelopeCarriesTheLatestCheckpointWithinTheBudget(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		c.Items = append(c.Items, item(i, "project", strings.Repeat("x", 900)))
 	}
-	env, cov = Envelope(c)
+	env, cov = Envelope(c, time.Time{})
 	if size(env) > Budget || !strings.Contains(env, "Next: retries.") || !strings.HasSuffix(env, "--- end of checkpoint") || cov.Shown == 0 || cov.Omitted == 0 {
 		t.Fatalf("size %d, coverage %+v", size(env), cov)
 	}
-	without, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Items: c.Items})
+	without, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Items: c.Items}, time.Time{})
 	if size(without) > Budget {
 		t.Fatal("budget exceeded without a checkpoint")
 	}
 
 	// A very long note is cut, and says how to read all of it.
 	long := &Checkpoint{ID: "cp-2", Note: strings.Repeat("progress 🚀 ", 800), CreatedAt: "2026-11-19T10:00:00Z"}
-	env, _ = Envelope(&Cache{Version: 1, WrittenAt: "t", Items: []Item{item(1, "project", "rule")}, Checkpoint: long})
+	env, _ = Envelope(&Cache{Version: 1, WrittenAt: "t", Items: []Item{item(1, "project", "rule")}, Checkpoint: long}, time.Time{})
 	if size(env) > Budget || !strings.Contains(env, "[cut; the full note is shown by: sessionkeep resume]") || !strings.Contains(env, "no Git repository at that time") {
 		t.Fatalf("long note: size %d", size(env))
+	}
+}
+
+// The research note names at most five claims, counts the rest, stays inside the budget next to
+// a full set of instructions, and is absent when no time is given or nothing needs a look.
+func TestResearchNoteIsBoundedAndOnlyAboutClaimsThatNeedALook(t *testing.T) {
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	past, future := "2026-11-01T00:00:00.000000000Z", "2026-12-01T00:00:00.000000000Z"
+	rs := &Research{More: 3}
+	for i := 0; i < 40; i++ {
+		rs.Claims = append(rs.Claims, Claim{ID: fmt.Sprintf("stale%03d-rest", i), Subject: strings.Repeat("long subject ", 30), State: "verified", Expires: past})
+	}
+	rs.Claims = append(rs.Claims, Claim{ID: "disputed-1", Subject: "gone\nfrom the page", State: "disputed"},
+		Claim{ID: "current-1", Subject: "CURRENT-SUBJECT", State: "verified", Expires: future})
+
+	env, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Research: rs}, now)
+	for _, want := range []string{"Past their re-check date: 40. Disputed: 1.", "- stale000 · STALE (re-check was due 2026-11-01)", "- and 36 more", "3 further claims", "--- end of research note"} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("note lacks %q:\n%s", want, env)
+		}
+	}
+	if strings.Count(env, "\n- stale") != 5 || strings.Contains(env, "CURRENT-SUBJECT") || strings.Contains(env, "gone\nfrom") {
+		t.Fatalf("wrong claims listed:\n%s", env)
+	}
+	if size(env) > 2500 {
+		t.Fatalf("the note is %d units long", size(env))
+	}
+	if env, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Research: rs}, time.Time{}); env != "" {
+		t.Fatalf("no time, no note: %q", env)
+	}
+	onlyCurrent := &Research{Claims: []Claim{{ID: "current-1", Subject: "s", State: "verified", Expires: future}}}
+	if env, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Research: onlyCurrent}, now); env != "" {
+		t.Fatalf("a current claim produced a note: %q", env)
+	}
+	// It becomes stale by the clock alone, without the cache being rewritten.
+	if env, _ := Envelope(&Cache{Version: 1, WrittenAt: "t", Research: onlyCurrent}, now.Add(30*24*time.Hour)); !strings.Contains(env, "Past their re-check date: 1.") {
+		t.Fatalf("a claim past its date was not named: %q", env)
+	}
+	// Next to more instructions than fit, everything together still fits and the note is whole.
+	c := &Cache{Version: 1, WrittenAt: "t", Research: rs}
+	for i := 0; i < 60; i++ {
+		c.Items = append(c.Items, item(i, "project", strings.Repeat("x", 400)))
+	}
+	env, cov := Envelope(c, now)
+	if size(env) > Budget || cov.Omitted == 0 || !strings.HasSuffix(env, "--- end of research note") {
+		t.Fatalf("size %d, coverage %+v, end %q", size(env), cov, env[len(env)-40:])
 	}
 }
