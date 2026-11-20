@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +17,48 @@ import (
 	"sessionkeep/internal/config"
 	"sessionkeep/internal/install"
 	"sessionkeep/internal/plugin"
+	"sessionkeep/internal/summarize"
 )
+
+// enablePlugin turns the generated plugin on for one Claude Code account by running Claude
+// Code's own two commands, exactly the ones `sessionkeep install` otherwise prints. It runs only
+// when the owner asked for it with --enable-plugin. SessionKeep still never writes a Claude Code
+// settings file itself. Both commands can be repeated safely (verified with Claude Code
+// 2.1.329: the second run reports "already" and exits 0).
+func enablePlugin(inv invocation, acct account, rec *install.Record) error {
+	bin, err := claudeProgram(inv.getenv)
+	if err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"plugin", "marketplace", "add", rec.Marketplace},
+		{"plugin", "install", plugin.Name + "@" + install.MarketplaceName},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		cmd, err := summarize.Command(ctx, bin, args)
+		if err != nil {
+			cancel()
+			return err
+		}
+		var out bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &out
+		cmd.Env = accountEnv(acct, os.Environ())
+		err = cmd.Run()
+		timedOut := ctx.Err() != nil
+		cancel()
+		if timedOut {
+			return fmt.Errorf("`claude %s` did not finish within two minutes", strings.Join(args[:len(args)-1], " "))
+		}
+		if err != nil {
+			msg := strings.TrimSpace(out.String())
+			if len(msg) > 400 {
+				msg = msg[:400]
+			}
+			return fmt.Errorf("`claude %s` failed (%v): %s", strings.Join(args[:len(args)-1], " "), err, msg)
+		}
+	}
+	return nil
+}
 
 func selfPath() (string, error) {
 	exe, err := os.Executable()
@@ -31,7 +74,7 @@ func selfPath() (string, error) {
 // installCmd copies this program to its per-user location and generates the plugin beside it.
 // It changes no Claude Code setting; it prints the commands that do.
 func installCmd(inv invocation) error {
-	if err := inv.only("with-mcp"); err != nil {
+	if err := inv.only("with-mcp", "enable-plugin"); err != nil {
 		return err
 	}
 	dir, err := install.Dir(runtime.GOOS, inv.getenv)
@@ -60,6 +103,19 @@ func installCmd(inv invocation) error {
 		}
 		which += ". The plugin is turned on per account.\n\n"
 	}
+	manual := claudeLines(acct, "  ", fmt.Sprintf(`plugin marketplace add "%s"`, rec.Marketplace), fmt.Sprintf("plugin install %s@%s", plugin.Name, install.MarketplaceName))
+	if inv.flags["enable-plugin"] != "" {
+		head := fmt.Sprintf("installed sessionkeep %s\nprogram: %s\nplugin:  %s\n\n", rec.Version, rec.Binary, rec.PluginDir)
+		tail := fmt.Sprint("Nothing is saved until you register a project (sessionkeep project add . --capture conversation)\nor choose automatic mode (sessionkeep setup --auto-add auto --level conversation).\n")
+		result := map[string]any{"install": rec, "account": acct.Name, "plugin_enabled": true}
+		if err := enablePlugin(inv, acct, rec); err != nil {
+			result["plugin_enabled"] = false
+			inv.emit(result, head+"The program is installed, but the plugin could NOT be turned on in Claude Code:\n  "+err.Error()+"\n\n"+which+"Run these yourself:\n"+manual+"\n"+tail)
+			return failErr("plugin_not_enabled", "the plugin was not turned on in Claude Code; the program itself is installed")
+		}
+		return inv.emit(result, head+fmt.Sprintf("The plugin is turned on in Claude Code for the account %q, by running Claude Code's own commands:\n%s\nRestart Claude Code (or run /reload-plugins in a session) for it to load.\nTo turn it off again:\n%s\n%s", acct.Name, manual,
+			claudeLines(acct, "  ", fmt.Sprintf("plugin uninstall %s@%s", plugin.Name, install.MarketplaceName)), tail))
+	}
 	text := fmt.Sprintf(`installed sessionkeep %s
 program: %s
 plugin:  %s
@@ -73,7 +129,7 @@ Nothing is saved until you register a project (sessionkeep project add . --captu
 or choose automatic mode (sessionkeep setup --auto-add auto --level conversation).
 To use the short command name, add this folder to your PATH: %s
 `, rec.Version, rec.Binary, rec.PluginDir, which,
-		claudeLines(acct, "  ", fmt.Sprintf(`plugin marketplace add "%s"`, rec.Marketplace), fmt.Sprintf("plugin install %s@%s", plugin.Name, install.MarketplaceName)),
+		manual,
 		claudeLines(acct, "  ", fmt.Sprintf(`--plugin-dir "%s"`, rec.PluginDir)), dir)
 	return inv.emit(rec, text)
 }

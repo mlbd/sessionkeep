@@ -54,6 +54,13 @@ for t in linux/amd64 darwin/arm64 windows/arm64; do
   if CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build ./... ; then echo "$t compiles"; else echo "FAIL: $t does not compile"; fail=1; fi
 done
 
+step "npm wrapper tests"
+if command -v node >/dev/null 2>&1; then
+  if node --test npm/test/locate.test.js >/dev/null 2>&1; then echo ok; else echo "FAIL: node --test npm/test/locate.test.js"; fail=1; fi
+else
+  echo "NOT RUN: Node is not on PATH (it is needed only to build and test the npm package)"
+fi
+
 step "build (CGO-free) and smoke"
 mkdir -p bin
 CGO_ENABLED=0 go build -trimpath -o bin/sessionkeep.exe ./cmd/sessionkeep && ./bin/sessionkeep.exe version && ./bin/sessionkeep.exe doctor || fail=1

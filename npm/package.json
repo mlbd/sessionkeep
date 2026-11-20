@@ -1,0 +1,11 @@
+{
+  "name": "sessionkeep",
+  "version": "0.0.0-dev",
+  "description": "Local-first developer memory for Claude Code. This package carries the SessionKeep program and sets it up.",
+  "private": true,
+  "license": "UNLICENSED",
+  "bin": { "sessionkeep": "bin/sessionkeep.js" },
+  "files": ["bin/", "lib/", "vendor/", "postinstall.js", "README.md"],
+  "scripts": { "postinstall": "node postinstall.js" },
+  "engines": { "node": ">=18" }
+}

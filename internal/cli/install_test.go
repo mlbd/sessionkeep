@@ -178,3 +178,54 @@ func TestAutostartNeedsAnInstallAndUsageIsChecked(t *testing.T) {
 		}
 	}
 }
+
+// MOCK: the stand-in records what Claude Code would be asked; what the real program does with the
+// two commands was tried by hand against a throwaway configuration folder (evidence/npm/N-A.md).
+func TestEnablePluginRunsClaudeCodesOwnTwoCommandsOnlyWhenAsked(t *testing.T) {
+	sb, dir := installSandbox(t)
+	calls := sb.fakeProgram("ok")
+	sb.ok("install")
+	if n := len(calls()); n != 0 {
+		t.Fatalf("install without --enable-plugin started Claude Code %d time(s)", n)
+	}
+	out := sb.ok("install", "--enable-plugin")
+	got := calls()
+	if len(got) != 2 {
+		t.Fatalf("want two commands, got %v", got)
+	}
+	market := filepath.Join(dir, "claude-plugin")
+	if a := strings.Join(got[0].Args, "|"); a != "plugin|marketplace|add|"+market {
+		t.Errorf("first command: %q", a)
+	}
+	if a := strings.Join(got[1].Args, "|"); a != "plugin|install|sessionkeep@sessionkeep-local" {
+		t.Errorf("second command: %q", a)
+	}
+	if !strings.Contains(out, "The plugin is turned on in Claude Code") || !strings.Contains(out, "Restart Claude Code") || strings.Contains(out, "No Claude Code setting was changed") {
+		t.Errorf("output: %q", out)
+	}
+}
+
+func TestEnablePluginUsesTheChosenAccountAndReportsFailure(t *testing.T) {
+	sb, _ := installSandbox(t)
+	work := filepath.Join(sb.env["USERPROFILE"], ".claude-work")
+	for _, d := range []string{filepath.Join(sb.env["USERPROFILE"], ".claude", "projects"), filepath.Join(work, "projects")} {
+		os.MkdirAll(d, 0o700)
+	}
+	sb.ok("account", "use", "work")
+	calls := sb.fakeProgram("ok")
+	sb.ok("install", "--enable-plugin")
+	for _, c := range calls() {
+		if c.Config != work {
+			t.Fatalf("the command ran for configuration folder %q, want %q", c.Config, work)
+		}
+	}
+
+	t.Setenv("SESSIONKEEP_FAKE_CLAUDE", "fail")
+	code, out, errOut := sb.run("install", "--enable-plugin")
+	if code != ExitFailure || !strings.Contains(out, "could NOT be turned on") || !strings.Contains(out, "not signed in") || !strings.Contains(out, "plugin marketplace add") || !strings.Contains(errOut, "the program itself is installed") {
+		t.Fatalf("exit=%d\n%q\n%q", code, out, errOut)
+	}
+	if out := sb.ok("doctor"); !strings.Contains(out, "hook commands all point at an existing program") {
+		t.Fatal("a failed plugin step must leave the installation itself in place")
+	}
+}

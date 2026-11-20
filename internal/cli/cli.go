@@ -74,8 +74,11 @@ Usage:
                                    Generate the Claude Code plugin directory for this binary;
                                    --with-mcp also registers the optional MCP server
                                    (changes no Claude Code setting)
-  sessionkeep install [--with-mcp]     Copy this program to a stable per-user place and generate the
-                                   Claude Code plugin beside it (changes no Claude Code setting)
+  sessionkeep install [--with-mcp] [--enable-plugin]
+                                   Copy this program to a stable per-user place and generate the
+                                   Claude Code plugin beside it. It changes no Claude Code setting
+                                   unless you add --enable-plugin, which runs Claude Code's own
+                                   two commands that turn the plugin on for your account
   sessionkeep uninstall [--purge-data] [--yes]
                                    Remove what install created; your data is kept unless you
                                    ask for it to be deleted too
@@ -223,7 +226,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -352,7 +355,7 @@ func dispatch(inv invocation) error {
 		return instructionCmd(inv, rest)
 	case "install":
 		if len(rest) != 0 {
-			return usageErr("usage: sessionkeep install [--with-mcp]")
+			return usageErr("usage: sessionkeep install [--with-mcp] [--enable-plugin]")
 		}
 		return installCmd(inv)
 	case "uninstall":

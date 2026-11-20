@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -152,6 +153,11 @@ func ParseResult(raw []byte) (text, model string, err error) {
 	}
 	sort.Strings(models)
 	return clip(text, MaxOutputBytes), strings.Join(models, ","), nil
+}
+
+// Command builds a process for the Claude Code program at bin, handling the Windows .cmd form.
+func Command(ctx context.Context, bin string, args []string) (*exec.Cmd, error) {
+	return command(ctx, bin, args)
 }
 
 // Runner asks a model for a summary of input and returns the answer and the model that wrote it.

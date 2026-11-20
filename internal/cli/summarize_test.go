@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 		os.WriteFile(out, []byte("done"), 0o600)
 		os.Exit(0)
 	}
-	if mode := os.Getenv("SESSIONKEEP_FAKE_CLAUDE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
+	if mode := os.Getenv("SESSIONKEEP_FAKE_CLAUDE"); mode != "" && len(os.Args) > 1 && (os.Args[1] == "-p" || os.Args[1] == "plugin") {
 		os.Exit(fakeClaude(mode))
 	}
 	os.Exit(m.Run())
