@@ -26,6 +26,7 @@ import (
 	"sessionkeep/internal/project"
 	"sessionkeep/internal/redact"
 	"sessionkeep/internal/store"
+	"sessionkeep/internal/summarize"
 )
 
 // Exit statuses (docs/09-INTERFACE_CONTRACTS.md). The hook entry point, added in a later slice,
@@ -81,6 +82,11 @@ Usage:
   sessionkeep autostart enable|disable|status
                                    Optional: store waiting events once when you log on
   sessionkeep history import [--yes]   Bring in earlier Claude Code sessions of your projects
+  sessionkeep summarize status | on | off | run | delete
+                                   Optional summaries of finished sessions, written by a model
+                                   through your own Claude Code sign-in. Off unless you turn it
+                                   on; "summarize on" explains what that means before it changes
+                                   anything
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
   sessionkeep forget record ID | captured --project P | project P   [--yes]
@@ -143,6 +149,9 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return ExitUsage
 	}
 	if args[0] == "hook" {
+		if getenv(summarize.GuardEnv) != "" {
+			return ExitOK // a summary call must never be captured as a session
+		}
 		return hook(args[1:], stdin, stdout, getenv)
 	}
 	if len(args) == 2 && args[0] == "ingest" && args[1] == "--quiet" {
@@ -152,11 +161,12 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 			inv.stdout, inv.getenv = io.Discard, getenv
 			if _, statErr := os.Stat(dataDirOf(getenv)); statErr == nil { // never create the data directory from a hook
 				ingestCmd(inv)
+				autoSummarize(getenv)
 			}
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from", "model", "daily-limit")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -205,7 +215,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "auto") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -313,6 +323,8 @@ func dispatch(inv invocation) error {
 		return sessionCmd(inv, rest)
 	case "history":
 		return historyCmd(inv, rest)
+	case "summarize":
+		return summarizeCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":
@@ -839,6 +851,15 @@ func sessionCmd(inv invocation, rest []string) error {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "session %s in project %q\nstarted %s, last activity %s, %s\n", info.ID, info.ProjectName, info.StartedAt, info.LastAt, info.State)
+	sum, hasSum, err := s.SummaryOf(ctx, info.ProjectID, info.ID)
+	if err != nil {
+		return err
+	}
+	out := map[string]any{"session": info, "turns": turns}
+	if hasSum {
+		out["summary"] = sum
+		fmt.Fprintf(&b, "\nSUMMARY written by a model (%s, %.10s) from %d of %d piece(s) of text. It is not the original; the text below is.\n%s\n", sum.Model, sum.CreatedAt, sum.SourceUsed, sum.SourceCount, sum.Text)
+	}
 	for _, t := range turns {
 		switch {
 		case t.Text != "":
@@ -847,7 +868,7 @@ func sessionCmd(inv invocation, rest []string) error {
 			fmt.Fprintf(&b, "\n(tool: %s)\n", t.Tool)
 		}
 	}
-	return inv.emit(map[string]any{"session": info, "turns": turns}, b.String())
+	return inv.emit(out, b.String())
 }
 
 // workDir picks the folder whose Git state belongs to a project for this invocation: the folder
@@ -1147,13 +1168,35 @@ func memoryCmd(inv invocation, cmd string, rest []string) error {
 	default:
 		fmt.Fprintf(&b, "%d result(s) from %s; that is all of them\n", len(res.Hits), scope)
 	}
+	// Summaries are searched too, and shown apart: they are a model's words about a session, and
+	// can match when the question uses other words than the session did.
+	sums, sumsPartial := []store.SummaryHit{}, false
+	plain := inv.flags["exact"] == "" && inv.flags["who"] == "" && since == "" && until == "" && inv.flags["cursor"] == ""
+	if plain {
+		if sums, sumsPartial, err = s.SearchSummaries(ctx, proj.ID, all, rest[1], 3); err != nil {
+			return err
+		}
+	}
+	if len(sums) > 0 {
+		b.WriteString("Session summaries that match (written by a model, not original text; read the session before relying on one):\n")
+		for _, h := range sums {
+			fmt.Fprintf(&b, "  session %.8s  %.10s  %s\n", h.SessionID, h.CreatedAt, strings.Join(strings.Fields(h.Snippet), " "))
+		}
+		if sumsPartial {
+			b.WriteString("  (these contain only some of the words)\n")
+		}
+		b.WriteString("  read a session with: sessionkeep session show <id>\n")
+	}
+	if plain && (len(res.Hits) == 0 || res.Method == "any") {
+		b.WriteString("Text is matched by its words, not by its meaning. Before concluding that something was never said, search again with other words for the same thing: a synonym, the file or function name, or part of the error message.\n")
+	}
 	if pending > 0 {
 		fmt.Fprintf(&b, "note: %d captured event(s) are not stored yet and were not searched; run `sessionkeep ingest` first for a complete answer\n", pending)
 	}
 	if len(res.Hits) > 0 {
 		b.WriteString("read a full record with: sessionkeep memory get <id>\n")
 	}
-	return inv.emit(map[string]any{"hits": res.Hits, "method": res.Method, "next_cursor": res.NextCursor, "scope": scope, "not_searched_pending_events": pending}, b.String())
+	return inv.emit(map[string]any{"hits": res.Hits, "method": res.Method, "next_cursor": res.NextCursor, "summaries": sums, "summaries_partial": sumsPartial, "scope": scope, "not_searched_pending_events": pending}, b.String())
 }
 
 // MaxInstructionChars bounds one instruction. An instruction longer than this could crowd every

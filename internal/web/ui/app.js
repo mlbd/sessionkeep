@@ -309,7 +309,11 @@ async function sessionView(projectId, sessionId) {
   title.textContent = 'Session';
   lede.textContent = `${s.project_name}, started ${when(s.started_at)}, last activity ${when(s.last_activity_at)}.`;
   const removal = el('div', { 'aria-live': 'polite' });
+  const m = r.data.summary;
   view.append(el('p', {}, el('a', { href: '#/history/' + projectId, text: 'Back to all sessions' })), removal,
+    m ? el('div', { class: 'quote' },
+      el('p', { class: 'quiet small', text: `Summary written by a model (${m.model}, ${when(m.created_at)}) from ${m.source_records_given_to_model} of ${plural(m.source_records, 'piece of text', 'pieces of text')}. It is not what was said; that is below.` }),
+      el('p', { class: 'said', text: m.text })) : null,
     el('div', {}, r.data.turns.filter(t => t.text || t.tool).map(t => t.text
       ? el('div', { class: 'turn ' + t.who },
         el('p', { class: 'who' }, t.who === 'user' ? 'You' : t.who === 'assistant' ? 'Claude' : 'Tool', el('small', { text: when(t.observed_at).slice(11) })),
@@ -341,7 +345,11 @@ async function searchView() {
     if (!cursor) results.replaceChildren();
     if (!r.ok) return say(problem(r), 'bad');
     const d = r.data;
-    say(d.hits.length ? `${plural(d.hits.length, 'result', 'results')}.` : 'Nothing saved matches that.', d.hits.length ? 'ok' : '');
+    const sums = d.summaries || [];
+    say(d.hits.length ? `${plural(d.hits.length, 'result', 'results')}.` : sums.length ? 'No piece of text matches, but a session summary does.' : 'Nothing saved matches that. Try other words for the same thing.', d.hits.length ? 'ok' : '');
+    if (sums.length) results.append(el('div', { class: 'quote' },
+      el('p', { class: 'quiet small', text: 'Session summaries that match' + (d.summaries_partial ? ' some of the words' : '') + '. A model wrote these; open the session to read what was said.' }),
+      sums.map(h => el('p', {}, el('a', { href: `#/history/${h.project_id}/${h.session_id}`, text: h.snippet.split('**').join('') })))));
     if (d.method === 'any') results.append(el('p', { class: 'state-warn', text: 'No piece of text has all of these words. These have some of them.' }));
     if (d.not_searched_pending_events) results.append(el('p', { class: 'state-warn', text: `${plural(d.not_searched_pending_events, 'captured event is', 'captured events are')} not stored yet and could not be searched. Store them from the Overview, then search again.` }));
     for (const h of d.hits) {

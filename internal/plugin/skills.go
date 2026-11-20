@@ -55,6 +55,8 @@ Search the current project:
 
 - Several words must all appear. Put an exact error message, file path or id in the query as it is; add --exact to match it as one literal string.
 - Narrow with --who user|assistant|tool, --since 2026-11-01, --until 2026-12-01, --limit 20.
+- Text is matched by its words, not by its meaning. If a search finds nothing, or only partial matches, search again two or three times with other words for the same thing (a synonym, the file or function name, part of the error message) before telling the user nothing was found.
+- The output may also list "Session summaries that match". Those were written by a model from a session. Use one to find the session, then read the session itself: SESSIONKEEP session show <id>
 - If the output ends with a --cursor value there are more results; repeat the command with that --cursor to get them.
 - Read one result in full: SESSIONKEEP memory get <id>
 

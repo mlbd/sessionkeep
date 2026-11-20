@@ -76,7 +76,7 @@ func newMCPServer(d mcpDeps) *mcp.Server {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_search", Annotations: readOnly,
-		Description: "Search the text of earlier sessions of this project (decisions, requirements, error messages, file names, earlier answers). Returns matching records with id, who said it and when."},
+		Description: "Search the text of earlier sessions of this project (decisions, requirements, error messages, file names, earlier answers). Returns matching records with id, who said it and when. Text is matched by its words, not its meaning: if nothing is found, search again with other words for the same thing before concluding it was never said."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
 			scope, refusal := d.scope(in.AllProjects)
 			if refusal != nil {

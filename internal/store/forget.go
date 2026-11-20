@@ -224,6 +224,9 @@ func (s *Store) Compact(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `insert into evidence_fts(evidence_fts) values('rebuild')`); err != nil {
 		return err
 	}
+	if _, err := s.db.ExecContext(ctx, `insert into summaries_fts(summaries_fts) values('rebuild')`); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `vacuum`); err != nil {
 		return err
 	}

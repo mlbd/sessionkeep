@@ -41,7 +41,21 @@ type Settings struct {
 	// Exclusions are normalized absolute paths. Nothing at or below them is ever captured,
 	// registered automatically, or mentioned in a reminder.
 	Exclusions []string `json:"exclusions"`
+	// Summaries is off unless the owner turned it on (`sessionkeep summarize on`).
+	Summaries Summaries `json:"summaries"`
 }
+
+// Summaries controls the optional model-written session summaries. Turning it on means stored
+// session text is sent, through the user's own Claude Code program, to the model they chose.
+type Summaries struct {
+	Enabled    bool   `json:"enabled"`
+	Model      string `json:"model,omitempty"`       // a Claude Code model alias or full name; empty means the default
+	DailyLimit int    `json:"daily_limit,omitempty"` // summaries per day; 0 means the default
+	Auto       bool   `json:"auto,omitempty"`        // also write summaries from the background drain after a session
+}
+
+// MaxDailySummaries is the highest daily limit the settings accept.
+const MaxDailySummaries = 500
 
 // AutoAdd is the behaviour for unregistered folders.
 type AutoAdd struct {
@@ -70,6 +84,17 @@ func (s Settings) Validate() error {
 		}
 	default:
 		return fmt.Errorf("auto_add.mode must be manual, ask or auto (got %q)", s.AutoAdd.Mode)
+	}
+	for _, r := range s.Summaries.Model {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r == '_' || r == '[' || r == ']') {
+			return fmt.Errorf("summaries.model may only hold letters, digits and - . _ [ ] (got %q)", s.Summaries.Model)
+		}
+	}
+	if len(s.Summaries.Model) > 80 || s.Summaries.DailyLimit < 0 || s.Summaries.DailyLimit > MaxDailySummaries {
+		return fmt.Errorf("summaries.model must be at most 80 characters and summaries.daily_limit between 0 and %d", MaxDailySummaries)
+	}
+	if s.Summaries.Auto && !s.Summaries.Enabled {
+		return errors.New("summaries.auto needs summaries.enabled")
 	}
 	for _, e := range s.Exclusions {
 		if strings.TrimSpace(e) == "" {

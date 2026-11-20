@@ -1,9 +1,10 @@
 # Project status
 
-**Last updated:** 2026-11-20 (session 15) • **Project name:** SessionKeep • **Active phase:** Phase 2, part A built; **version 0.1.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; owner instruction of 2026-11-20: redesign the dashboard, move to Phase 2, finish for use. Awaiting owner: D72/D78 (Phase 1 gate, read by the agent as accepted for a private pilot), D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 (session 16) • **Project name:** SessionKeep • **Active phase:** Phase 2, part A built; **version 0.1.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; owner instruction of 2026-11-20: redesign the dashboard, move to Phase 2, finish for use. Awaiting owner: D72/D78 (Phase 1 gate, read by the agent as accepted for a private pilot), D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
+- `evidence/phase-2/P2-B.md` — session 16: optional summaries through the owner's Claude Code sign-in; tested against a stand-in only.
 - `evidence/phase-2/P2-A.md` — what session 15 built, tested and did not do.
 - `evidence/phase-1/ACCEPTANCE.md` — what Phase 1 does, measured results, partial and not-run test rows.
 - `docs/FIRST_USE.md` — the owner's steps to start using SessionKeep.
@@ -15,10 +16,11 @@
 - **Instructions and continuity:** `remember`, `instruction list|show|supersede|archive`, `checkpoint`, `resume`; instructions and the latest checkpoint are delivered at SessionStart in a bounded envelope.
 - **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`, `session list|show`.
 - **History:** `history import` brings in earlier Claude Code sessions of registered projects (preview unless `--yes`).
+- **Summaries (optional, off by default):** `summarize status|on|off|run|delete`; written by the user's own `claude -p`, stored apart from original text, searched by `memory search`.
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
 - **Surfaces:** generated Claude Code plugin with three skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
-- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0004.
+- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0005.
 
 ## State of the owner's computer
 
@@ -34,7 +36,15 @@
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 15, 2026-11-20)
+## Latest session record (session 16, 2026-11-20)
+
+- Agent: Claude Code (claude-fable-5-2). Owner asked whether summaries could use the Claude plan and supplied the support-article text (D81).
+- Built P2-03 (optional summaries) and search guidance in place of embeddings (D82–D85). Record: `evidence/phase-2/P2-B.md`.
+- `bash scripts/check.sh` → **CHECK PASSED** before the commit. Seven mutation checks each made a test fail.
+- **No real request was made.** All tests use a stand-in program started through a `.cmd` file.
+- Defect found while building: the daily limit counted stored summaries instead of requests. Fixed.
+
+## Earlier session record (session 15, 2026-11-20)
 
 - Agent: Claude Code (claude-fable-5-2). Commits `b66895f`, `f9f91b3`, `5ea683b`, `e4091fc`, then the documentation commit.
 - `bash scripts/check.sh` → **CHECK PASSED** (unit tests, race detector, cross-compiles, build, smoke) before each commit except `b66895f`, which was made with a failing gate by mistake and corrected by `f9f91b3`.
@@ -54,7 +64,8 @@ Real daily use with the installed plugin; a full history import on real data and
 1. Enable the plugin: run the two `claude plugin` commands (`docs/FIRST_USE.md`), then register projects.
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
-4. Phase 2 remainder (D79): summaries and meaning-based search need a model (download or paid); claude-mem database import needs a schema and licence review. Say which, if any, to pursue.
+4. Summaries are built but untested against the real program: permission for about five live requests is needed (`evidence/phase-2/P2-B.md` section 4). Then decide whether to turn on `--auto`.
+4a. Phase 2 remainder: fact versioning needs a design decision; a local embedding model needs a download and an ADR; claude-mem database import needs a schema and licence review.
 5. D66: auto-start through the per-user logon list.
 
 ## Next smallest task and acceptance checks
