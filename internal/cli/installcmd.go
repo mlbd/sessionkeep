@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,44 +15,20 @@ import (
 	"sessionkeep/internal/config"
 	"sessionkeep/internal/install"
 	"sessionkeep/internal/plugin"
-	"sessionkeep/internal/summarize"
 )
 
 // enablePlugin turns the generated plugin on for one Claude Code account by running Claude
 // Code's own two commands, exactly the ones `sessionkeep install` otherwise prints. It runs only
-// when the owner asked for it with --enable-plugin. SessionKeep still never writes a Claude Code
-// settings file itself. Both commands can be repeated safely (verified with Claude Code
-// 2.1.329: the second run reports "already" and exits 0).
+// when the owner asked for it (--enable-plugin, `account enable`, or the dashboard button).
+// SessionKeep still never writes a Claude Code settings file itself. Both commands can be repeated
+// safely (verified with Claude Code 2.1.329: the second run reports "already" and exits 0).
 func enablePlugin(inv invocation, acct account, rec *install.Record) error {
-	bin, err := claudeProgram(inv.getenv)
-	if err != nil {
-		return err
-	}
 	for _, args := range [][]string{
 		{"plugin", "marketplace", "add", rec.Marketplace},
-		{"plugin", "install", plugin.Name + "@" + install.MarketplaceName},
+		{"plugin", "install", pluginID},
 	} {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		cmd, err := summarize.Command(ctx, bin, args)
-		if err != nil {
-			cancel()
+		if _, err := claudeFor(inv, acct, args...); err != nil {
 			return err
-		}
-		var out bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &out, &out
-		cmd.Env = accountEnv(acct, os.Environ())
-		err = cmd.Run()
-		timedOut := ctx.Err() != nil
-		cancel()
-		if timedOut {
-			return fmt.Errorf("`claude %s` did not finish within two minutes", strings.Join(args[:len(args)-1], " "))
-		}
-		if err != nil {
-			msg := strings.TrimSpace(out.String())
-			if len(msg) > 400 {
-				msg = msg[:400]
-			}
-			return fmt.Errorf("`claude %s` failed (%v): %s", strings.Join(args[:len(args)-1], " "), err, msg)
 		}
 	}
 	return nil

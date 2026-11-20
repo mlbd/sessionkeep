@@ -22,9 +22,17 @@ command. The install command runs these two lines for that account; `sessionkeep
 In PowerShell write `$env:LOCALAPPDATA` instead of `%LOCALAPPDATA%`. These two commands are the
 only change to Claude Code; SessionKeep never edits Claude Code settings files itself. Restart Claude Code.
 
-The plugin is turned on per account. `sessionkeep account list` shows the accounts SessionKeep found,
-`sessionkeep account use NAME` changes which one it acts for (summaries, importing earlier sessions,
-and the commands it prints), and `sessionkeep install` prints the two commands again for that account.
+The plugin is turned on per account, and every account it is on for shares the same memory:
+work started with one account can be continued with another. To turn it on or off for an
+account, open the dashboard's Overview page and use "Claude Code accounts", or in a terminal:
+
+    sessionkeep account plugins          # where it is on
+    sessionkeep account enable NAME
+    sessionkeep account disable NAME     # what is already saved stays
+
+Restart Claude Code for that account afterwards. Separately, `sessionkeep account use NAME` chooses
+which one account SessionKeep itself acts for: whose plan pays for summaries, and where earlier
+sessions are imported from.
 
 ## 2. Choose what is remembered
 

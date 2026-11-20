@@ -174,3 +174,74 @@ func TestSeveralAccountsAreFoundAndTheOwnerChooses(t *testing.T) {
 		t.Errorf("after `account auto` a choice is still recorded: %+v", a.Data)
 	}
 }
+
+// MOCK: the stand-in for Claude Code remembers in which configuration folder the plugin was
+// installed. What the real program does was tried by hand (evidence/npm/N-A.md).
+func TestThePluginIsTurnedOnAndOffPerAccount(t *testing.T) {
+	sb, _ := installSandbox(t)
+	home := sb.env["USERPROFILE"]
+	work := filepath.Join(home, ".claude-work")
+	for _, d := range []string{filepath.Join(home, ".claude", "projects"), filepath.Join(work, "projects")} {
+		os.MkdirAll(d, 0o700)
+	}
+	calls := sb.fakeProgram("ok")
+	states := func() map[string]string {
+		var out struct {
+			Data struct {
+				Accounts []struct{ Name, Plugin string }
+			}
+		}
+		if err := json.Unmarshal([]byte(sb.ok("account", "plugins", "--json")), &out); err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]string{}
+		for _, a := range out.Data.Accounts {
+			m[a.Name] = a.Plugin
+		}
+		return m
+	}
+
+	if code, _, errOut := sb.run("account", "enable", "work"); code != ExitFailure || !strings.Contains(errOut, "not installed yet") {
+		t.Fatalf("enable before install: exit=%d %q", code, errOut)
+	}
+	sb.ok("install")
+	if s := states(); s["claude"] != "off" || s["work"] != "off" {
+		t.Fatalf("before anything was turned on: %v", s)
+	}
+	if out := sb.ok("account", "enable", "work"); !strings.Contains(out, "shares the same memory") || !strings.Contains(out, "Restart Claude Code") {
+		t.Errorf("enable output: %q", out)
+	}
+	if s := states(); s["claude"] != "off" || s["work"] != "on" {
+		t.Fatalf("turning one account on must not touch the other: %v", s)
+	}
+	sb.ok("account", "enable", "claude")
+	if s := states(); s["claude"] != "on" || s["work"] != "on" {
+		t.Fatalf("both on: %v", s)
+	}
+	// The account SessionKeep uses for summaries is a separate choice and is not changed by this.
+	if a := sb.accounts(); a.Data.Decided {
+		t.Errorf("turning the plugin on chose an account: %+v", a.Data)
+	}
+	sb.ok("account", "disable", "work")
+	if s := states(); s["claude"] != "on" || s["work"] != "off" {
+		t.Fatalf("after turning one off: %v", s)
+	}
+	before := len(calls())
+	sb.ok("account", "disable", "work") // already off: asks, but uninstalls nothing
+	for _, c := range calls()[before:] {
+		if len(c.Args) > 1 && c.Args[1] == "uninstall" {
+			t.Error("an account that is already off was uninstalled again")
+		}
+	}
+	if code, _, errOut := sb.run("account", "enable", "nobody"); code != ExitFailure || !strings.Contains(errOut, "found: claude, work") {
+		t.Fatalf("unknown account: exit=%d %q", code, errOut)
+	}
+
+	t.Setenv("SESSIONKEEP_FAKE_CLAUDE", "fail")
+	if s := states(); s["work"] != "unknown" {
+		t.Fatalf("when Claude Code cannot be asked the state must be unknown, not a guess: %v", s)
+	}
+	if code, _, errOut := sb.run("account", "enable", "work"); code != ExitFailure || !strings.Contains(errOut, "not signed in") {
+		t.Fatalf("a failed enable: exit=%d %q", code, errOut)
+	}
+}

@@ -51,6 +51,35 @@ func fakeClaude(mode string) int {
 	case "fail":
 		fmt.Fprintln(os.Stderr, "not signed in")
 		return 1
+	}
+	if len(os.Args) > 2 && os.Args[1] == "plugin" {
+		// One line per configuration folder in which the plugin is installed.
+		state, cfg := os.Getenv("SESSIONKEEP_FAKE_LOG")+".plugins", os.Getenv("CLAUDE_CONFIG_DIR")
+		raw, _ := os.ReadFile(state)
+		var keep []string
+		has := false
+		for _, l := range strings.Split(string(raw), "\n") {
+			if l == "="+cfg {
+				has = true
+			} else if l != "" {
+				keep = append(keep, l)
+			}
+		}
+		switch os.Args[2] {
+		case "list":
+			if has {
+				fmt.Println(`[{"id":"other@x","enabled":true},{"id":"sessionkeep@sessionkeep-local","enabled":true}]`)
+			} else {
+				fmt.Println(`[{"id":"other@x","enabled":true}]`)
+			}
+			return 0
+		case "install":
+			keep = append(keep, "="+cfg)
+		}
+		os.WriteFile(state, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+		return 0
+	}
+	switch mode {
 	case "garbage":
 		fmt.Println("Welcome! How can I help?")
 		return 0

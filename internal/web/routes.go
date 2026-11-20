@@ -226,6 +226,24 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		s.command(w, "account", "use", "--", in.Name)
 	})
+	// Whether the plugin is on in each Claude Code account, and turning it on or off there.
+	// The button on the page is the owner's request; the change is made by Claude Code's own
+	// plugin commands, never by writing its settings.
+	mux.HandleFunc("GET /api/accounts/plugin", func(w http.ResponseWriter, r *http.Request) { s.command(w, "account", "plugins") })
+	mux.HandleFunc("POST /api/accounts/plugin", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+			On   bool   `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		verb := "disable"
+		if in.On {
+			verb = "enable"
+		}
+		s.command(w, "account", verb, "--", in.Name)
+	})
 	mux.HandleFunc("GET /api/summaries", func(w http.ResponseWriter, r *http.Request) { s.command(w, "summarize", "status") })
 	mux.HandleFunc("POST /api/summaries", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-20 (session 18) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.7.1 installed on the owner's computer through the npm package, plugin turned on in the owner's active Claude Code account (D107); no session has run with it yet** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-21 (session 18) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.8.0 installed on the owner's computer through the npm package, plugin turned on in the owner's active Claude Code account (D107); no session has run with it yet** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
@@ -29,7 +29,7 @@
 
 ## State of the owner's computer
 
-- `sessionkeep 0.7.1` is installed by `npm install -g dist/sessionkeep-0.7.1.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.8.0` is installed by `npm install -g dist/sessionkeep-0.8.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
 - **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local`, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
@@ -49,6 +49,8 @@
 - Sandbox runs with real npm and real Claude Code: normal install, scripts skipped, Claude Code missing, reinstall, removal. All behaved as designed.
 - Real install on the owner's computer from the clean commit: npm exit 0; `sessionkeep 0.7.0`, doctor 6 ok, summaries / research / account settings kept; plugin enabled in the active account only.
 - Owner tried the dashboard: the import button gave no sign of working (the status line was off-screen). Fixed in 0.7.1: buttons show a turning ring while they work, the import shows a moving bar in place, the status line stays in view. Not looked at in a browser by the agent.
+- 2026-11-21, owner's first real use: projects added from the dashboard, import preview correct (71 sessions found; 4 sessions "already saved as they happened", so live capture works); the plugin's four skills are listed in a live session.
+- Owner asked for an easy way to turn SessionKeep on for his other account. Built in 0.8.0 (D111): Overview section "Claude Code accounts" and `sessionkeep account plugins | enable | disable`. Tests: `TestThePluginIsTurnedOnAndOffPerAccount`, `TestDashboardTurnsThePluginOnAndOffForAnAccount` (mock Claude Code); four rules broken on purpose, each caught. Real, read-only: `account plugins` on the owner's computer answered in 2 s (default account off, active account on). Not done by the agent: turning it on in the default account (the owner's click), and looking at the new section in a browser.
 - Phase 3 part B was not started; it is still the next task.
 
 ## Session 17 record (2026-11-20)

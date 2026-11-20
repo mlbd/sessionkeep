@@ -238,6 +238,44 @@ async function overview() {
         field('Model', model, 'Used only while summaries are on.'),
         el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Save this choice' })))));
   }
+  accountsSection();
+}
+
+// Which Claude Code accounts have SessionKeep turned on. Claude Code takes a moment to answer, so
+// this part fills in after the rest of the page.
+function accountsSection() {
+  const box = el('div', { 'aria-live': 'polite' }, working('Asking Claude Code where SessionKeep is turned on.'));
+  view.append(el('h2', { text: 'Claude Code accounts' }),
+    el('p', { class: 'quiet', text: 'SessionKeep keeps one memory on this computer. Every account it is turned on for saves into it and reads from it, so work you start with one account can be continued with another.' }),
+    box);
+  const load = async () => {
+    const r = await api('GET', '/api/accounts/plugin');
+    if (!box.isConnected) return;
+    if (!r.ok) return box.replaceChildren(el('p', { class: 'state-warn', text: problem(r) }));
+    const list = r.data.accounts || [];
+    if (!list.length) return box.replaceChildren(el('p', { class: 'quiet', text: 'No Claude Code account was found on this computer.' }));
+    const change = async (a, on) => {
+      const res = await api('POST', '/api/accounts/plugin', { name: a.name, on });
+      if (!res.ok) return say(problem(res), 'bad');
+      await load();
+      say(on ? `Turned on for "${a.name}". Restart Claude Code there for it to load.` : `Turned off for "${a.name}". What is already saved stays.`, 'ok');
+    };
+    box.replaceChildren(el('ul', { class: 'threads' }, list.map(a => {
+      const on = a.plugin === 'on', known = on || a.plugin === 'off';
+      const started = a.command ? `You start it with "${a.command}".` : 'No short command was found for it.';
+      const used = a.last_used ? ` Last used ${a.last_used}.` : ' Never used.';
+      return el('li', { class: 'thread' }, el('span', { class: 'strand ' + (on ? 'on' : known ? 'off' : 'paused') }), el('div', {},
+        el('h3', { text: a.name }),
+        el('p', { class: on ? 'state-ok' : known ? 'state-off' : 'state-warn', text: on ? 'On. Sessions with this account are saved, and Claude can use the memory there.'
+          : known ? 'Off. Nothing from sessions with this account is saved, and Claude cannot use the memory there.'
+          : `Claude Code could not be asked: ${a.plugin_note || 'no reason given'}` }),
+        el('p', { class: 'quiet small', text: started + used }),
+        known ? el('div', { class: 'row' }, on
+          ? el('button', { type: 'button', text: 'Turn off for this account', 'aria-label': `Turn SessionKeep off for the account ${a.name}`, onclick: () => change(a, false) })
+          : el('button', { type: 'button', class: 'primary', text: 'Turn on for this account', 'aria-label': `Turn SessionKeep on for the account ${a.name}`, onclick: () => change(a, true) })) : null));
+    })));
+  };
+  load();
 }
 
 // ---- Projects -------------------------------------------------------------------------------

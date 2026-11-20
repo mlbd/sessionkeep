@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -437,5 +439,51 @@ func TestDashboardJourneyThroughTheAPI(t *testing.T) {
 	}
 	if code := b.do("POST", "/api/projects/no-such-project/pause", map[string]string{}, nil, &e); code != http.StatusUnprocessableEntity {
 		t.Fatalf("unknown project: %d", code)
+	}
+}
+
+// MOCK Claude Code program, real server and commands.
+func TestDashboardTurnsThePluginOnAndOffForAnAccount(t *testing.T) {
+	sb, _ := installSandbox(t)
+	home := sb.env["USERPROFILE"]
+	for _, d := range []string{filepath.Join(home, ".claude", "projects"), filepath.Join(home, ".claude-work", "projects")} {
+		os.MkdirAll(d, 0o700)
+	}
+	sb.fakeProgram("ok")
+	sb.ok("install")
+	b := signIn(t, sb)
+	type reply struct {
+		Data struct {
+			Accounts []struct{ Name, Plugin string }
+		}
+		Error struct{ Code, Message string }
+	}
+	state := func() map[string]string {
+		var r reply
+		if code := b.do("GET", "/api/accounts/plugin", nil, nil, &r); code != 200 {
+			t.Fatalf("list: %d %+v", code, r.Error)
+		}
+		m := map[string]string{}
+		for _, a := range r.Data.Accounts {
+			m[a.Name] = a.Plugin
+		}
+		return m
+	}
+	var r reply
+	if code := b.do("POST", "/api/accounts/plugin", map[string]any{"name": "work", "on": true}, nil, &r); code != 200 {
+		t.Fatalf("turn on: %d %+v", code, r.Error)
+	}
+	if s := state(); s["work"] != "on" || s["claude"] != "off" {
+		t.Fatalf("after turning one account on: %v", s)
+	}
+	if code := b.do("POST", "/api/accounts/plugin", map[string]any{"name": "work", "on": false}, nil, &r); code != 200 {
+		t.Fatalf("turn off: %d %+v", code, r.Error)
+	}
+	if s := state(); s["work"] != "off" {
+		t.Fatalf("after turning it off: %v", s)
+	}
+	// A name that could be read as a flag is passed as a name, and an unknown one is refused.
+	if code := b.do("POST", "/api/accounts/plugin", map[string]any{"name": "--yes", "on": true}, nil, &r); code != http.StatusUnprocessableEntity || r.Error.Code != "not_found" {
+		t.Fatalf("unknown account: %d %+v", code, r.Error)
 	}
 }

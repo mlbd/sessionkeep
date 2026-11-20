@@ -90,7 +90,7 @@ Usage:
                                    through your own Claude Code sign-in. Off unless you turn it
                                    on; "summarize on" explains what that means before it changes
                                    anything
-  sessionkeep account list | use NAME | auto
+  sessionkeep account list | use NAME | auto | plugins | enable NAME | disable NAME
                                    Which Claude Code sign-in SessionKeep acts for when this computer
                                    has more than one (summaries, history import, printed commands)
   sessionkeep research status | on | off | fetch URL | record | list | search | show | check | withdraw
