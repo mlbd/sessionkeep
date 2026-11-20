@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-20 (session 16) • **Project name:** SessionKeep • **Active phase:** Phase 2, part A built; **version 0.3.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; owner instruction of 2026-11-20: redesign the dashboard, move to Phase 2, finish for use. Awaiting owner: D72/D78 (Phase 1 gate, read by the agent as accepted for a private pilot), D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 (session 16) • **Project name:** SessionKeep • **Active phase:** Phase 2, part A built; **version 0.4.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; owner instruction of 2026-11-20: redesign the dashboard, move to Phase 2, finish for use. Awaiting owner: D72/D78 (Phase 1 gate, read by the agent as accepted for a private pilot), D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
@@ -25,7 +25,7 @@
 
 ## State of the owner's computer
 
-- `sessionkeep 0.3.0` (commit `dabf4ea`) is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.4.0` (commit `128610d`) is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
 - **The plugin is not enabled in Claude Code.** The two commands printed by `sessionkeep install` are the owner's step (D48). The installed copy is set to the owner's active (second) account (D91). No auto-start entry exists.
 - claude-mem is untouched.
