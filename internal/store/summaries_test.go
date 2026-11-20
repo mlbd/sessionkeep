@@ -37,7 +37,7 @@ func TestSummaryIsRefusedWhenTheSessionChangedAndReplacedOtherwise(t *testing.T)
 	mustExec(t, s, insEvidence, "evi-2", "proj-A", "loc-2", "second text")
 	mustExec(t, s, insEvent, "ev-2", "proj-A", "sess-A", "k-2", "evi-2")
 	mustExec(t, s, `update sessions set state = 'ended' where id = 'sess-A'`)
-	c, err := s.SessionsToSummarize(ctx, "", "2000-01-01", 2, 10)
+	c, err := s.SessionsToSummarize(ctx, "", "2000-01-01", 2, 10, 10)
 	if err != nil || len(c) != 1 || c[0].SessionID != "sess-A" || c[0].Texts != 2 {
 		t.Fatalf("candidates = %+v, %v", c, err)
 	}
@@ -47,8 +47,15 @@ func TestSummaryIsRefusedWhenTheSessionChangedAndReplacedOtherwise(t *testing.T)
 	if n, _ := s.SummaryCount(ctx); n != 1 {
 		t.Fatalf("%d summaries, want 1 (replaced)", n)
 	}
-	if c, _ := s.SessionsToSummarize(ctx, "", "2000-01-01", 2, 10); len(c) != 0 {
+	if c, _ := s.SessionsToSummarize(ctx, "", "2000-01-01", 2, 10, 10); len(c) != 0 {
 		t.Fatalf("a session with a current summary is still a candidate: %+v", c)
+	}
+	mustExec(t, s, `delete from summaries`)
+	if c, _ := s.SessionsToSummarize(ctx, "", "2000-01-01", 2, 1000, 10); len(c) != 0 {
+		t.Fatalf("a session with almost no text is a candidate: %+v", c)
+	}
+	if err := s.PutSummary(ctx, sum("proj-A", "sess-A", 2)); err != nil {
+		t.Fatal(err)
 	}
 
 	// Found by a word of the summary, inside the project only, and gone from the index when a

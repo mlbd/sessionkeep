@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"sessionkeep/internal/summarize"
 )
@@ -19,6 +20,11 @@ import (
 // canned answer. MOCK: what the real program answers is not verified here.
 
 func TestMain(m *testing.M) {
+	if out := os.Getenv("SESSIONKEEP_FAKE_DETACHED"); out != "" && len(os.Args) > 1 && os.Args[1] == "detached-probe" {
+		time.Sleep(700 * time.Millisecond)
+		os.WriteFile(out, []byte("done"), 0o600)
+		os.Exit(0)
+	}
 	if mode := os.Getenv("SESSIONKEEP_FAKE_CLAUDE"); mode != "" && len(os.Args) > 1 && os.Args[1] == "-p" {
 		os.Exit(fakeClaude(mode))
 	}
@@ -58,7 +64,11 @@ func fakeClaude(mode string) int {
 // fakeProgram points the sandbox at the stand-in and returns a function that reads its calls.
 func (sb *sandbox) fakeProgram(mode string) func() []fakeCall {
 	sb.t.Helper()
-	dir := sb.t.TempDir()
+	// Like the real one, the stand-in sits in a folder with a space in its name.
+	dir := filepath.Join(sb.t.TempDir(), "Program Files", "node js")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		sb.t.Fatal(err)
+	}
 	self, err := os.Executable()
 	if err != nil {
 		sb.t.Fatal(err)
@@ -71,6 +81,14 @@ func (sb *sandbox) fakeProgram(mode string) func() []fakeCall {
 		sb.t.Fatal(err)
 	}
 	log := filepath.Join(dir, "calls.jsonl")
+	// The detached process is run in-process and to completion, so a test sees its result.
+	// Starting a detached process for real is covered by TestStartDetachedDoesNotWait.
+	real := spawnSummarizer
+	spawnSummarizer = func(getenv func(string) string) error {
+		Run([]string{"summarize", "run", "--detached"}, strings.NewReader(""), io.Discard, io.Discard, getenv)
+		return nil
+	}
+	sb.t.Cleanup(func() { spawnSummarizer = real })
 	sb.env[EnvClaudeBin] = shim
 	sb.t.Setenv("SESSIONKEEP_FAKE_CLAUDE", mode)
 	sb.t.Setenv("SESSIONKEEP_FAKE_LOG", log)
@@ -107,7 +125,7 @@ type runOut struct {
 	Data struct {
 		Written  int      `json:"written"`
 		Failed   int      `json:"failed"`
-		Skipped  int      `json:"skipped_too_little_text"`
+		Skipped  int      `json:"skipped_changed_meanwhile"`
 		LimitHit bool     `json:"daily_limit_reached"`
 		Errors   []string `json:"errors"`
 		Sessions []struct {
@@ -194,7 +212,7 @@ func TestSummarizeWritesOneSummaryPerFinishedSession(t *testing.T) {
 	sb.ok("ingest")
 	sb.ok("project", "pause", paused)
 	calls := sb.fakeProgram("ok")
-	sb.ok("summarize", "on", "--model", "opus", "--yes")
+	sb.ok("summarize", "on", "--model", "opus", "--manual", "--yes")
 
 	// A dry run names the session and sends nothing.
 	if dry := sb.summarize(ExitOK, "--dry-run"); len(dry.Data.Sessions) != 1 || dry.Data.Sessions[0].ProjectName != "App" || len(calls()) != 0 {
@@ -331,7 +349,7 @@ func TestSummarizeKeepsToTheDailyLimit(t *testing.T) {
 	}
 	// A higher limit lets the other session through; the two-word session is never sent.
 	sb.ok("summarize", "on", "--daily-limit", "10", "--yes")
-	if r := sb.summarize(ExitOK); r.Data.Written != 1 || r.Data.Skipped != 1 || len(calls()) != 2 {
+	if r := sb.summarize(ExitOK); r.Data.Written != 1 || len(calls()) != 2 {
 		t.Fatalf("third run = %+v, calls %d", r.Data, len(calls()))
 	}
 	for _, c := range calls() {
@@ -351,7 +369,7 @@ func TestSummarizeKeepsToTheDailyLimit(t *testing.T) {
 	}
 }
 
-func TestBackgroundSummariesAreOptInAndBackOffAfterAFailure(t *testing.T) {
+func TestBackgroundSummariesRunByThemselvesAndBackOffAfterAFailure(t *testing.T) {
 	sb := newSandbox(t)
 	app := sb.dir("app")
 	sb.ok("project", "add", app, "--capture", "conversation", "--name", "App")
@@ -359,16 +377,16 @@ func TestBackgroundSummariesAreOptInAndBackOffAfterAFailure(t *testing.T) {
 	sb.finished("s2", app, loopPrompt)
 	sb.ok("ingest")
 	calls := sb.fakeProgram("fail")
-	sb.ok("summarize", "on", "--yes") // on, but not in the background
+	sb.ok("summarize", "on", "--manual", "--yes") // on, but only by hand
 	sb.run("ingest", "--quiet")
 	if len(calls()) != 0 {
-		t.Fatal("the background drain summarised without --auto")
+		t.Fatal("the background drain summarised although the owner chose --manual")
 	}
-	sb.ok("summarize", "on", "--auto", "--yes")
+	sb.ok("summarize", "on", "--yes") // automatic is what "on" means unless --manual is given
 	sb.run("ingest", "--quiet")
 	sb.run("ingest", "--quiet")
-	if n := len(calls()); n != 1 {
-		t.Fatalf("after a failed background attempt the program was started %d time(s), want 1 (then a pause)", n)
+	if n := len(calls()); n != 2 {
+		t.Fatalf("after a failed background run the program was started %d time(s), want 2 (two failures stop a run, then a pause)", n)
 	}
 	// With the pause over and the program working, each drain writes one summary.
 	t.Setenv("SESSIONKEEP_FAKE_CLAUDE", "ok")
@@ -377,7 +395,7 @@ func TestBackgroundSummariesAreOptInAndBackOffAfterAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb.run("ingest", "--quiet")
-	if out := sb.ok("summarize", "status"); !strings.Contains(out, "stored: 1;") || len(calls()) != 2 {
+	if out := sb.ok("summarize", "status"); !strings.Contains(out, "stored: 2;") || len(calls()) != 4 {
 		t.Fatalf("background run: %s (calls %d)", out, len(calls()))
 	}
 	if _, err := os.Stat(filepath.Join(paths, "summarize.attempt")); err == nil {
@@ -407,4 +425,28 @@ func TestHooksDoNothingInsideASummaryCall(t *testing.T) {
 	if n := sb.spoolCount(); n != 0 {
 		t.Fatalf("a summary call was captured: %d spooled event(s)", n)
 	}
+}
+
+func TestStartDetachedDoesNotWait(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "probe.txt")
+	began := time.Now()
+	if err := startDetached(self, []string{"detached-probe"}, append(os.Environ(), "SESSIONKEEP_FAKE_DETACHED="+out)); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(began); d > 500*time.Millisecond {
+		t.Fatalf("starting the detached process took %s; it must not wait for it", d)
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatal("the process had already finished when the call returned")
+	}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if raw, err := os.ReadFile(out); err == nil && string(raw) == "done" {
+			return
+		}
+	}
+	t.Fatal("the detached process never did its work")
 }

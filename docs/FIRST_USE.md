@@ -42,22 +42,23 @@ configuration folder need `--from FOLDER` unless `CLAUDE_CONFIG_DIR` is set in t
   `sessionkeep checkpoint "..."`, `sessionkeep resume`.
 - `sessionkeep status` shows what is stored and whether anything is waiting; `sessionkeep doctor` checks health.
 
-## 5. Summaries of finished sessions (optional, off by default)
+## 5. Summaries of finished sessions
 
-    sessionkeep summarize on                  # explains what it means, changes nothing
-    sessionkeep summarize on --yes            # turns it on (model: sonnet, at most 20 requests a day)
+Summaries are **on** in your installed copy (model: Sonnet, at most 20 requests a day). You do
+not run anything: some seconds after a session has ended and the next one has started, a summary of
+the ended one is written in the background by the Claude Code program on this computer, under
+your own sign-in. It is stored locally, marked as written by a model, shown above the session
+and found by search.
+
+Change it on the dashboard (Overview, "Session summaries") or in a terminal:
+
+    sessionkeep summarize status
+    sessionkeep summarize off
     sessionkeep summarize on --model opus --yes
-    sessionkeep summarize run --dry-run       # which sessions would be sent
-    sessionkeep summarize run                 # write them
-    sessionkeep summarize status | off | delete
+    sessionkeep summarize on --manual --yes   # only when you run: sessionkeep summarize run
+    sessionkeep summarize delete --yes        # remove the summaries, keep the text
 
-A summary is written by the Claude Code program on this computer under your own sign-in, so it
-uses your plan's limits. It is stored locally, marked as written by a model, shown above the
-session and found by `sessionkeep memory search`. Add `--auto` to `summarize on` to have one written
-in the background after sessions; that part has not been tried in a real session yet.
-
-This has only been tested against a stand-in for the program. Run `summarize run --limit 1`
-first and read the result with `sessionkeep session show ID`.
+After importing earlier sessions, their summaries arrive over several days, at most 20 a day.
 
 ## Running next to claude-mem
 

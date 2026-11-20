@@ -4,7 +4,7 @@
 
 ## Start here
 
-- `evidence/phase-2/P2-B.md` — session 16: optional summaries through the owner's Claude Code sign-in; tested against a stand-in only.
+- `evidence/phase-2/P2-B.md` — session 16: automatic session summaries through the owner's Claude Code sign-in; three real requests made (section 4).
 - `evidence/phase-2/P2-A.md` — what session 15 built, tested and did not do.
 - `evidence/phase-1/ACCEPTANCE.md` — what Phase 1 does, measured results, partial and not-run test rows.
 - `docs/FIRST_USE.md` — the owner's steps to start using SessionKeep.
@@ -16,7 +16,7 @@
 - **Instructions and continuity:** `remember`, `instruction list|show|supersede|archive`, `checkpoint`, `resume`; instructions and the latest checkpoint are delivered at SessionStart in a bounded envelope.
 - **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`, `session list|show`.
 - **History:** `history import` brings in earlier Claude Code sessions of registered projects (preview unless `--yes`).
-- **Summaries (optional, off by default):** `summarize status|on|off|run|delete`; written by the user's own `claude -p`, stored apart from original text, searched by `memory search`.
+- **Summaries (off by default, automatic when on):** `summarize status|on|off|run|delete` and a block on the dashboard Overview; written by the user's own `claude -p` from a detached background process, stored apart from original text, searched by `memory search`.
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
 - **Surfaces:** generated Claude Code plugin with three skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
@@ -40,8 +40,9 @@
 
 - Agent: Claude Code (claude-fable-5-2). Owner asked whether summaries could use the Claude plan and supplied the support-article text (D81).
 - Built P2-03 (optional summaries) and search guidance in place of embeddings (D82–D85). Record: `evidence/phase-2/P2-B.md`.
-- `bash scripts/check.sh` → **CHECK PASSED** before the commit. Seven mutation checks each made a test fail.
-- **No real request was made.** All tests use a stand-in program started through a `.cmd` file.
+- `bash scripts/check.sh` → **CHECK PASSED** before each commit. Eight mutation checks each made a test fail.
+- Three real requests against synthetic text (D87). They exposed a defect: the program could not be started from a folder with a space in its name. Fixed.
+- Owner asked for automatic operation: summaries now run from a detached background process (D86), verified in one real `claude -p` session. Summaries are on in the installed copy (D88). Voyage AI declined for now (D89).
 - Defect found while building: the daily limit counted stored summaries instead of requests. Fixed.
 
 ## Earlier session record (session 15, 2026-11-20)
@@ -64,7 +65,7 @@ Real daily use with the installed plugin; a full history import on real data and
 1. Enable the plugin: run the two `claude plugin` commands (`docs/FIRST_USE.md`), then register projects.
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
-4. Summaries are built but untested against the real program: permission for about five live requests is needed (`evidence/phase-2/P2-B.md` section 4). Then decide whether to turn on `--auto`.
+4. Summaries are on in the installed copy (Sonnet). Say if Opus is wanted, or change it on the Overview page. Judge the quality of the first real summaries.
 4a. Phase 2 remainder: fact versioning needs a design decision; a local embedding model needs a download and an ADR; claude-mem database import needs a schema and licence review.
 5. D66: auto-start through the per-user logon list.
 

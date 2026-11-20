@@ -185,6 +185,25 @@ async function overview() {
       : a.mode === 'manual' ? 'New folders are ignored until you add them.' : 'In a new folder SessionKeep saves nothing and reminds you once that you can add it.';
     view.append(el('h2', { text: 'Folders SessionKeep has not seen' }), el('p', { text: words }), el('p', {}, el('a', { href: '#/projects', text: 'Change this' })));
   }
+
+  const sm = await api('GET', '/api/summaries');
+  if (sm.ok) {
+    const d = sm.data;
+    const on = choice('summaries', 'Write a short summary of each finished session', [
+      ['off', 'Off', 'No session text is given to a model.'],
+      ['on', 'On', 'After a session ends, Claude Code on this computer writes a summary in the background, under your own sign-in. Each one uses a little of your plan.'],
+    ], d.enabled ? 'on' : 'off');
+    const models = [['sonnet', 'Sonnet (recommended)'], ['opus', 'Opus (uses more of your plan)'], ['haiku', 'Haiku (lightest)']];
+    if (!models.some(m => m[0] === d.model)) models.push([d.model, d.model]);
+    const model = select('summary-model', models, d.model);
+    view.append(el('h2', { text: 'Session summaries' }),
+      el('p', { class: 'quiet', text: d.enabled
+        ? `${plural(d.summaries, 'summary', 'summaries')} written so far. ${d.requests_today} of ${d.daily_limit} requests used today. ${plural(d.sessions_waiting, 'finished session is', 'finished sessions are')} waiting.` + (d.program ? '' : ' Claude Code was not found on this computer, so none can be written.')
+        : 'A summary makes an earlier session easier to find when you search with different words. It is kept apart from what was actually said, and marked as written by a model.' }),
+      el('div', { class: 'table' }, el('form', { onsubmit: e => { e.preventDefault(); act('/api/summaries', { enabled: on.value() === 'on', model: model.value }, 'Saved.'); } },
+        on, field('Model', model, 'Used only while summaries are on.'),
+        el('div', {}, el('button', { type: 'submit', class: 'primary', text: 'Save this choice' })))));
+  }
 }
 
 // ---- Projects -------------------------------------------------------------------------------

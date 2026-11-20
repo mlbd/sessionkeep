@@ -72,19 +72,21 @@ type SummaryCandidate struct {
 }
 
 // SessionsToSummarize lists sessions that are over (ended, or silent since idleBefore), hold at
-// least minTexts text records, belong to a project that is saving conversation text and is not
+// least minTexts text records and minChars characters of text, belong to a project that is saving conversation text and is not
 // paused, and have no summary of exactly that text. Newest first. An empty projectID means every
 // project.
-func (s *Store) SessionsToSummarize(ctx context.Context, projectID, idleBefore string, minTexts, limit int) ([]SummaryCandidate, error) {
+func (s *Store) SessionsToSummarize(ctx context.Context, projectID, idleBefore string, minTexts, minChars, limit int) ([]SummaryCandidate, error) {
 	rows, err := s.db.QueryContext(ctx, `select sid, pid, name, texts, last_at from (
 		select s.id as sid, s.project_id as pid, p.name, s.state,
 			(select count(*) from events v where v.session_id = s.id and v.project_id = s.project_id and v.evidence_id is not null) as texts,
-			coalesce((select max(observed_at) from events v where v.session_id = s.id and v.project_id = s.project_id), s.started_at) as last_at
+			coalesce((select max(observed_at) from events v where v.session_id = s.id and v.project_id = s.project_id), s.started_at) as last_at,
+			coalesce((select sum(length(e.text)) from events v join evidence e on e.id = v.evidence_id and e.project_id = v.project_id
+				where v.session_id = s.id and v.project_id = s.project_id), 0) as chars
 		from sessions s join projects p on p.id = s.project_id
 		where (?1 = '' or s.project_id = ?1) and p.capture_policy in ('conversation','extended') and p.paused_at is null and p.archived_at is null)
-		where texts >= ?2 and (state <> 'open' or last_at < ?3)
+		where texts >= ?2 and chars >= ?5 and (state <> 'open' or last_at < ?3)
 			and not exists (select 1 from summaries m where m.session_id = sid and m.project_id = pid and m.source_count = texts)
-		order by last_at desc, sid limit ?4`, projectID, minTexts, idleBefore, limit)
+		order by last_at desc, sid limit ?4`, projectID, minTexts, idleBefore, limit, minChars)
 	if err != nil {
 		return nil, err
 	}

@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -165,7 +164,10 @@ func ClaudeCLI(bin, dir string, env []string) Runner {
 	return func(ctx context.Context, model, input string) (string, string, error) {
 		ctx, cancel := context.WithTimeout(ctx, Timeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, bin, Args(model)...)
+		cmd, err := command(ctx, bin, Args(model))
+		if err != nil {
+			return "", "", err
+		}
 		cmd.Dir = dir
 		cmd.Env = append(append([]string{}, env...), GuardEnv+"=1")
 		cmd.Stdin = strings.NewReader(input)

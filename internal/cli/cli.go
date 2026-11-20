@@ -215,7 +215,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "auto") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}

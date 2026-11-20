@@ -24,7 +24,9 @@ import (
 const (
 	defaultDailySummaries = 20
 	// A session with less text than this is not worth a request.
-	minSummaryBytes = 200
+	minSummaryChars = 200
+	// One background run writes at most this many summaries.
+	autoBatch = 5
 	// An open session that has been silent this long is treated as over.
 	summaryIdle = 6 * time.Hour
 	// After a background attempt that did not finish cleanly, the next one waits this long.
@@ -46,7 +48,7 @@ type summarizeStatus struct {
 
 type summarizeReport struct {
 	Written  int                      `json:"written"`
-	Skipped  int                      `json:"skipped_too_little_text"`
+	Skipped  int                      `json:"skipped_changed_meanwhile"`
 	Failed   int                      `json:"failed"`
 	Errors   []string                 `json:"errors,omitempty"`
 	Waiting  []store.SummaryCandidate `json:"sessions,omitempty"` // with --dry-run: what would be sent
@@ -118,7 +120,7 @@ func openRead(ctx context.Context, st state) (*store.Store, error) {
 // summarizeCmd is `sessionkeep summarize status|on|off|run|delete`.
 func summarizeCmd(inv invocation, rest []string) error {
 	usageText := `usage: sessionkeep summarize status
-       sessionkeep summarize on [--model MODEL] [--daily-limit N] [--auto] [--yes]
+       sessionkeep summarize on [--model MODEL] [--daily-limit N] [--manual] [--yes]
        sessionkeep summarize off
        sessionkeep summarize run [--project ID_OR_PATH] [--limit N] [--dry-run]
        sessionkeep summarize delete [--project ID_OR_PATH] [--yes]`
@@ -143,7 +145,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 			if out.Total, err = s.SummaryCount(ctx); err != nil {
 				return err
 			}
-			waiting, err := s.SessionsToSummarize(ctx, "", time.Now().Add(-summaryIdle).UTC().Format(capture.TimeFormat), 2, 1000)
+			waiting, err := s.SessionsToSummarize(ctx, "", time.Now().Add(-summaryIdle).UTC().Format(capture.TimeFormat), 2, minSummaryChars, 1000)
 			if err != nil {
 				return err
 			}
@@ -151,9 +153,9 @@ func summarizeCmd(inv invocation, rest []string) error {
 		}
 		state := "off (no session text is given to a model)"
 		if out.Enabled {
-			state = "on, written when you run `sessionkeep summarize run`"
-			if out.Auto {
-				state = "on, written in the background after sessions"
+			state = "on, written in the background after sessions end"
+			if !out.Auto {
+				state = "on, written only when you run `sessionkeep summarize run`"
 			}
 		}
 		prog := out.Program
@@ -164,7 +166,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 			state, out.Model, out.DailyLimit, out.AskedToday, out.Total, out.Waiting, prog))
 
 	case "on":
-		if err := inv.only("model", "daily-limit", "auto", "yes"); err != nil {
+		if err := inv.only("model", "daily-limit", "manual", "yes"); err != nil {
 			return err
 		}
 		st, err := load(inv, true)
@@ -173,7 +175,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 		}
 		next := st.settings
 		next.Summaries.Enabled = true
-		next.Summaries.Auto = inv.flags["auto"] != ""
+		next.Summaries.Auto = inv.flags["manual"] == ""
 		if v := inv.flags["model"]; v != "" {
 			next.Summaries.Model = v
 		}
@@ -187,9 +189,9 @@ func summarizeCmd(inv invocation, rest []string) error {
 		if err := next.Validate(); err != nil {
 			return usageErr("%v", err)
 		}
-		when := "only when you run `sessionkeep summarize run`"
-		if next.Summaries.Auto {
-			when = "in the background after a session, one at a time, and when you run `sessionkeep summarize run`"
+		when := "in the background, by itself, after a session has ended"
+		if !next.Summaries.Auto {
+			when = "only when you run `sessionkeep summarize run`"
 		}
 		text := fmt.Sprintf(`Turning summaries on means:
   - When a session is over, SessionKeep gives its stored text (secrets already removed) to the Claude
@@ -226,6 +228,10 @@ func summarizeCmd(inv invocation, rest []string) error {
 			"Summaries are OFF. No session text will be given to a model. Summaries already written are kept; remove them with `sessionkeep summarize delete`.\n")
 
 	case "run":
+		if inv.flags["detached"] != "" { // how the background drain starts this program; not for use by hand
+			summarizeDetached(inv)
+			return nil
+		}
 		if err := inv.only("project", "limit", "dry-run"); err != nil {
 			return err
 		}
@@ -239,7 +245,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 				return usageErr("--limit must be a positive number (got %q)", v)
 			}
 		}
-		rep, err := summarizeRun(inv, st, inv.flags["project"], limit, inv.flags["dry-run"] != "", false)
+		rep, err := summarizeRun(inv, st, inv.flags["project"], limit, inv.flags["dry-run"] != "")
 		if err != nil {
 			return err
 		}
@@ -251,7 +257,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 			}
 			b.WriteString("NOTHING SENT. Run without --dry-run to write them.\n")
 		} else {
-			fmt.Fprintf(&b, "Summaries written: %d (model %s). Sessions with too little text to summarise: %d. Failed: %d.\n", rep.Written, rep.Model, rep.Skipped, rep.Failed)
+			fmt.Fprintf(&b, "Summaries written: %d (model %s). Sessions that changed meanwhile and wait for the next run: %d. Failed: %d.\n", rep.Written, rep.Model, rep.Skipped, rep.Failed)
 			for _, e := range rep.Errors {
 				fmt.Fprintf(&b, "  failed: %s\n", e)
 			}
@@ -303,7 +309,7 @@ func summarizeCmd(inv invocation, rest []string) error {
 // summarizeRun writes summaries for finished sessions that have none, newest first, within the
 // daily limit. The model runs without the database lease held, so capture is never kept waiting;
 // the lease is taken only for the moment each summary is stored.
-func summarizeRun(inv invocation, st state, projectKey string, limit int, dry, background bool) (summarizeReport, error) {
+func summarizeRun(inv invocation, st state, projectKey string, limit int, dry bool) (summarizeReport, error) {
 	rep := summarizeReport{Model: summaryModel(st.settings)}
 	if !st.settings.Summaries.Enabled {
 		return rep, failErr("summaries_off", "summaries are off; `sessionkeep summarize on` explains what turning them on means")
@@ -337,7 +343,7 @@ func summarizeRun(inv invocation, st state, projectKey string, limit int, dry, b
 	if limit > 0 && limit < budget {
 		budget = limit
 	}
-	candidates, err := s.SessionsToSummarize(ctx, projectID, time.Now().Add(-summaryIdle).UTC().Format(capture.TimeFormat), 2, 1000)
+	candidates, err := s.SessionsToSummarize(ctx, projectID, time.Now().Add(-summaryIdle).UTC().Format(capture.TimeFormat), 2, minSummaryChars, 1000)
 	if err != nil {
 		return rep, err
 	}
@@ -377,14 +383,12 @@ func summarizeRun(inv invocation, st state, projectKey string, limit int, dry, b
 			return rep, err
 		}
 		var pieces []summarize.Piece
-		size := 0
 		for _, t := range turns {
 			if t.Text != "" {
 				pieces = append(pieces, summarize.Piece{Who: t.Who, At: t.ObservedAt, Text: t.Text})
-				size += len(t.Text)
 			}
 		}
-		if size < minSummaryBytes || len(pieces) != c.Texts {
+		if len(pieces) != c.Texts { // the session changed since it was listed
 			rep.Skipped++
 			continue
 		}
@@ -415,30 +419,63 @@ func summarizeRun(inv invocation, st state, projectKey string, limit int, dry, b
 	return rep, nil
 }
 
-// autoSummarize is called at the end of the background drain. It does nothing unless the owner
-// turned on background summaries, writes at most one, and never reports anything to the host.
-// A marker file keeps an attempt that was cut short (or failed) from being repeated at once.
+// spawnSummarizer starts this program again as a detached process that writes the summaries.
+// It is a variable so tests can run that work in-process instead of starting the test binary.
+var spawnSummarizer = func(getenv func(string) string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return startDetached(exe, []string{"summarize", "run", "--detached"}, os.Environ())
+}
+
+func attemptMarker(st state) string { return filepath.Join(st.paths.CacheDir, "summarize.attempt") }
+
+// autoSummarize is called at the end of the background drain. It does nothing unless summaries
+// are on and automatic, a finished session is waiting, today's limit is not used up and no
+// recent attempt went wrong. Then it starts a detached process and returns at once: the host may
+// end a background hook at any time, and a request cut short would be paid for and lost.
 func autoSummarize(getenv func(string) string) {
 	if getenv(summarize.GuardEnv) != "" {
 		return
 	}
-	inv, err := parse([]string{"summarize", "run"})
-	if err != nil {
-		return
-	}
-	inv.stdout, inv.getenv = io.Discard, getenv
+	inv := invocation{flags: map[string]string{}, stdout: io.Discard, getenv: getenv}
 	st, err := load(inv, false)
 	if err != nil || !st.settings.Summaries.Enabled || !st.settings.Summaries.Auto {
 		return
 	}
-	marker := filepath.Join(st.paths.CacheDir, "summarize.attempt")
-	if fi, err := os.Stat(marker); err == nil && time.Since(fi.ModTime()) < autoBackoff {
+	if fi, err := os.Stat(attemptMarker(st)); err == nil && time.Since(fi.ModTime()) < autoBackoff {
 		return
 	}
-	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+	if summaryLimit(st.settings)-requestsToday(st, time.Now()) <= 0 {
 		return
 	}
-	if rep, err := summarizeRun(inv, st, "", 1, false, true); err == nil && rep.Failed == 0 {
-		os.Remove(marker)
+	ctx := context.Background()
+	s, err := store.OpenReadOnly(ctx, st.paths.DBPath)
+	if err != nil {
+		return
+	}
+	waiting, err := s.SessionsToSummarize(ctx, "", time.Now().Add(-summaryIdle).UTC().Format(capture.TimeFormat), 2, minSummaryChars, 1)
+	s.Close()
+	if err != nil || len(waiting) == 0 {
+		return
+	}
+	spawnSummarizer(getenv)
+}
+
+// summarizeDetached is the detached process. It prints nothing. A marker file is written before
+// the first request and removed after a clean run, so an attempt that failed or was killed is
+// not repeated for a while.
+func summarizeDetached(inv invocation) {
+	inv.stdout = io.Discard
+	st, err := load(inv, false)
+	if err != nil || !st.settings.Summaries.Enabled || !st.settings.Summaries.Auto {
+		return
+	}
+	if err := os.WriteFile(attemptMarker(st), nil, 0o600); err != nil {
+		return
+	}
+	if rep, err := summarizeRun(inv, st, "", autoBatch, false); err == nil && rep.Failed == 0 {
+		os.Remove(attemptMarker(st))
 	}
 }

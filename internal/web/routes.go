@@ -214,6 +214,28 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.command(w, "checkpoint", flag("project", in.Project), "--", in.Note)
 	})
 
+	// Optional session summaries. Turning them on here is the owner's confirmation: the page
+	// says what it means next to the choice.
+	mux.HandleFunc("GET /api/summaries", func(w http.ResponseWriter, r *http.Request) { s.command(w, "summarize", "status") })
+	mux.HandleFunc("POST /api/summaries", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Enabled bool   `json:"enabled"`
+			Model   string `json:"model"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if !in.Enabled {
+			s.command(w, "summarize", "off")
+			return
+		}
+		args := []string{"summarize", "on", "--yes"}
+		if in.Model != "" {
+			args = append(args, flag("model", in.Model))
+		}
+		s.command(w, args...)
+	})
+
 	// Earlier Claude Code sessions. Without "confirm": true the answer is 409 with what would
 	// be imported; nothing is read from anywhere but Claude Code's own folder on this computer.
 	mux.HandleFunc("POST /api/history/import", func(w http.ResponseWriter, r *http.Request) {
