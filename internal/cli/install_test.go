@@ -41,7 +41,7 @@ func TestInstallIsIdempotentAndUninstallRemovesOnlyWhatItCreated(t *testing.T) {
 	}
 	first := files(t, dir)
 	want := []string{install.BinaryName(), "install.json", "claude-plugin/.claude-plugin/marketplace.json", "claude-plugin/sessionkeep/.claude-plugin/plugin.json",
-		"claude-plugin/sessionkeep/hooks/hooks.json", "claude-plugin/sessionkeep/skills/recall/SKILL.md", "claude-plugin/sessionkeep/skills/remember/SKILL.md", "claude-plugin/sessionkeep/skills/resume/SKILL.md"}
+		"claude-plugin/sessionkeep/hooks/hooks.json", "claude-plugin/sessionkeep/skills/recall/SKILL.md", "claude-plugin/sessionkeep/skills/remember/SKILL.md", "claude-plugin/sessionkeep/skills/resume/SKILL.md", "claude-plugin/sessionkeep/skills/research/SKILL.md"}
 	for _, w := range want {
 		found := false
 		for _, f := range first {

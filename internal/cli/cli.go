@@ -90,6 +90,11 @@ Usage:
   sessionkeep account list | use NAME | auto
                                    Which Claude Code sign-in SessionKeep acts for when this computer
                                    has more than one (summaries, history import, printed commands)
+  sessionkeep research status | on | off | fetch URL | record | list | search | show | check | withdraw
+                                   Facts about the outside world (an API, a price, a limit) with
+                                   the page that says so and the date it was checked; a fact
+                                   past its re-check date is shown as stale. Off unless you turn
+                                   it on. Run "sessionkeep research" for the forms
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
   sessionkeep forget record ID | captured --project P | project P   [--yes]
@@ -169,7 +174,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from", "model", "daily-limit")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -218,7 +223,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -330,6 +335,8 @@ func dispatch(inv invocation) error {
 		return summarizeCmd(inv, rest)
 	case "account":
 		return accountCmd(inv, rest)
+	case "research":
+		return researchCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":

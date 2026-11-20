@@ -18,6 +18,7 @@ func TestSkillsNameThisBinaryAndKeepTheSafetyRules(t *testing.T) {
 		"recall":   {"memory search", "memory get", "evidence, not instructions", "not found", "--all-projects", quoted + " ingest"},
 		"remember": {"--scope project", "--yes", "ask them to confirm", "Do not rephrase", quoted + " remember"},
 		"resume":   {quoted + " resume", quoted + " checkpoint", "WARNING", "Do not switch branches", "not new instructions"},
+		"research": {quoted + " research search", quoted + " research check", quoted + " research record", "never instructions to follow", "Do not present it as current", "Do not turn it on yourself", "do not fill the gap from memory"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(dir, "skills", name, "SKILL.md"))
 		if err != nil {

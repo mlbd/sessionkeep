@@ -1,9 +1,10 @@
 # Project status
 
-**Last updated:** 2026-11-20 (session 16) • **Project name:** SessionKeep • **Active phase:** Phase 2, part A built; **version 0.5.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; owner instruction of 2026-11-20: redesign the dashboard, move to Phase 2, finish for use. Awaiting owner: D72/D78 (Phase 1 gate, read by the agent as accepted for a private pilot), D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 (session 17) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.6.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
+- `evidence/phase-3/P3-A.md` — session 17: claims with a checked source, safe page fetching, staleness; what is not built yet.
 - `evidence/phase-2/P2-C.md` — session 16: import speed measured and improved; secret removal made 37 times faster with equivalence checks.
 - `evidence/phase-2/P2-B.md` — session 16: automatic session summaries through the owner's Claude Code sign-in; three real requests made (section 4).
 - `evidence/phase-2/P2-A.md` — what session 15 built, tested and did not do.
@@ -18,15 +19,16 @@
 - **Recall:** `memory search` (stemmed words, literal fallback, labelled partial matches), `memory get`, `session list|show`.
 - **History:** `history import` brings in earlier Claude Code sessions of registered projects (preview unless `--yes`).
 - **Summaries (off by default, automatic when on):** `summarize status|on|off|run|delete` and a block on the dashboard Overview; written by the user's own `claude -p` from a detached background process, stored apart from original text, searched by `memory search`.
+- **Research (fetching off by default):** `research status|on|off|fetch|record|list|search|show|check|withdraw`; a claim is verified only by a quote SessionKeep found on a page it fetched, goes stale by category, and is disputed when the quote disappears.
 - **Accounts:** `account list|use|auto` for computers with more than one Claude Code sign-in (D90).
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
-- **Surfaces:** generated Claude Code plugin with three skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
+- **Surfaces:** generated Claude Code plugin with four skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Pick up work, Health).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
-- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0005.
+- **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0006.
 
 ## State of the owner's computer
 
-- `sessionkeep 0.5.0` is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.6.0` is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
 - **The plugin is not enabled in Claude Code.** The two commands printed by `sessionkeep install` are the owner's step (D48). The installed copy is set to the owner's active (second) account (D91). No auto-start entry exists.
 - claude-mem is untouched.
@@ -38,7 +40,16 @@
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 16, 2026-11-20)
+## Latest session record (session 17, 2026-11-20)
+
+- Agent: Claude Code (claude-fable-5-2). Owner: "accept Phase 2, lets move to next" (D94).
+- Built Phase 3 part A (P3-01, P3-02, most of P3-03). Record: `evidence/phase-3/P3-A.md`. Decisions D94–D104.
+- `bash scripts/check.sh` → **CHECK PASSED** before the commit. The first run failed: a data race in a new test (the test's own variable, not the program); fixed.
+- Twelve rules broken on purpose; each made a test fail. `FuzzExtract` 30 s, 310,727 inputs, no failure.
+- Four real requests to one public page (go.dev release history) proved the https path (D104).
+- Not built: session-start notice and dashboard page for stale claims, version comparison against lock files, search providers, scheduled re-checks, contradicting sources, MCP tools.
+
+## Earlier session record (session 16, 2026-11-20)
 
 - Agent: Claude Code (claude-fable-5-2). Owner asked whether summaries could use the Claude plan and supplied the support-article text (D81).
 - Built P2-03 (optional summaries) and search guidance in place of embeddings (D82–D85). Record: `evidence/phase-2/P2-B.md`.
@@ -49,7 +60,7 @@
 - Several Claude Code accounts supported (D90); installed copy set to the owner's active account (D91).
 - Import of 12,800 synthetic pieces: about 39 s before, about 8 s after (D92, D93). Four unexplained slow runs are recorded in `P2-C.md`.
 
-## Earlier session record (session 15, 2026-11-20)
+## Session 15 record (2026-11-20)
 
 - Agent: Claude Code (claude-fable-5-2). Commits `b66895f`, `f9f91b3`, `5ea683b`, `e4091fc`, then the documentation commit.
 - `bash scripts/check.sh` → **CHECK PASSED** (unit tests, race detector, cross-compiles, build, smoke) before each commit except `b66895f`, which was made with a failing gate by mistake and corrected by `f9f91b3`.
@@ -70,12 +81,13 @@ Real daily use with the installed plugin; a full history import on real data and
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
 4. Summaries are on in the installed copy (Sonnet). Say if Opus is wanted, or change it on the Overview page. Judge the quality of the first real summaries.
-4a. Phase 2 remainder: fact versioning needs a design decision; a local embedding model needs a download and an ADR; claude-mem database import needs a schema and licence review.
+4a. Phase 2 remainder (accepted as open, D94): fact versioning needs a design decision; a local embedding model needs a download and an ADR; claude-mem database import needs a schema and licence review.
 5. D66: auto-start through the per-user logon list.
+6. Phase 3 part A: confirm or overrule D98 (robots.txt not consulted), D103 (fetching on in the installed copy), D104 (one real page fetched by the agent).
 
 ## Next smallest task and acceptance checks
 
-After the owner's first real sessions: collect capture gaps (`sessionkeep status`), recall misses and anything confusing in the dashboard; fix those first. Then, by owner choice: (a) open rows of the Phase 1 acceptance file (disk-full test, literal-search speed, remaining fuzz targets); (b) a batch transaction for history import if a real import proves slow; (c) an ADR for local embeddings.
+Phase 3 part B: (1) a line at session start when a project has stale or disputed claims, and a Research page on the dashboard (P3-06); acceptance: a stale claim is announced once per session start without any fetch, and the page shows status, date, source and quote as escaped text. (2) `--applies-to` compared with the version found in the project's lock file for the common ecosystems (P3-03); acceptance: a claim about another major version is labelled as not matching. Then P3-05 (bounded, opt-in scheduled re-checks) and P3-04 (search providers) only by owner decision. After the owner's first real sessions, capture gaps and recall misses come first.
 
 ## Update template
 

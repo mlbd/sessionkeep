@@ -68,6 +68,27 @@ Change it on the dashboard (Overview, "Session summaries") or in a terminal:
 
 After importing earlier sessions, their summaries arrive over several days, at most 20 a day.
 
+## 6. Facts that go out of date
+
+API behaviour, versions, prices and limits change. SessionKeep can keep such a fact for a project
+together with the page that says so, the exact words quoted from it and the date it was checked.
+A fact is stored as verified only if SessionKeep itself fetched the page and found the words on it.
+After its re-check date (one day for prices and security, fourteen for API behaviour, and so on)
+it is shown as STALE until it is checked again; if the words are gone from the page it is shown
+as DISPUTED.
+
+You do not run anything: the plugin's `research` skill tells Claude to look at these facts before
+relying on one, and to record what it looks up. In a terminal:
+
+    sessionkeep research status
+    sessionkeep research list
+    sessionkeep research check --due          # fetch the sources of stale facts again
+    sessionkeep research off                  # stop all fetching
+
+Fetching is **on** in your installed copy. A page is fetched only when a command names it or
+re-checks a recorded fact: public https pages only, nothing in the background, and nothing about
+your project is sent. The page text is not kept, only its address, date, a digest and the quote.
+
 ## Running next to claude-mem
 
 Both can be enabled at once; they do not share files. That has not been tested. If you remove

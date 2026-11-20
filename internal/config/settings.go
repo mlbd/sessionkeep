@@ -45,6 +45,17 @@ type Settings struct {
 	Summaries Summaries `json:"summaries"`
 	// ClaudeAccount is which Claude Code sign-in SessionKeep acts for when the computer has several.
 	ClaudeAccount ClaudeAccount `json:"claude_account"`
+	// Research is off unless the owner turned it on (`sessionkeep research on`).
+	Research Research `json:"research"`
+}
+
+// Research controls fetching public pages to check claims. Turning it on lets a command that
+// names a URL open a connection to that address; nothing is fetched in the background.
+type Research struct {
+	Enabled bool `json:"enabled"`
+	// AllowLocal lists "host:port" addresses on this computer or a private network that may be
+	// fetched although such addresses are refused by default (for example a local docs server).
+	AllowLocal []string `json:"allow_local,omitempty"`
 }
 
 // ClaudeAccount names a Claude Code configuration folder. Not chosen means: whichever one the
@@ -104,6 +115,15 @@ func (s Settings) Validate() error {
 	}
 	if c := s.ClaudeAccount; c.ConfigDir != "" && (!c.Chosen || !(strings.HasPrefix(c.ConfigDir, "/") || (len(c.ConfigDir) > 2 && c.ConfigDir[1] == ':'))) {
 		return fmt.Errorf("claude_account.config_dir must be an absolute path and needs chosen=true (got %q)", c.ConfigDir)
+	}
+	for _, a := range s.Research.AllowLocal {
+		host, port, ok := strings.Cut(a, ":")
+		if i := strings.LastIndex(a, ":"); i >= 0 {
+			host, port, ok = a[:i], a[i+1:], true
+		}
+		if !ok || host == "" || port == "" || strings.Trim(port, "0123456789") != "" || strings.ContainsAny(a, " /@") {
+			return fmt.Errorf("research.allow_local entries must be host:port (got %q)", a)
+		}
 	}
 	if s.Summaries.Auto && !s.Summaries.Enabled {
 		return errors.New("summaries.auto needs summaries.enabled")
