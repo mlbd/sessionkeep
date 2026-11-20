@@ -4,6 +4,7 @@
 
 ## Start here
 
+- `evidence/phase-2/P2-C.md` — session 16: import speed measured and improved; secret removal made 37 times faster with equivalence checks.
 - `evidence/phase-2/P2-B.md` — session 16: automatic session summaries through the owner's Claude Code sign-in; three real requests made (section 4).
 - `evidence/phase-2/P2-A.md` — what session 15 built, tested and did not do.
 - `evidence/phase-1/ACCEPTANCE.md` — what Phase 1 does, measured results, partial and not-run test rows.
@@ -45,6 +46,8 @@
 - Three real requests against synthetic text (D87). They exposed a defect: the program could not be started from a folder with a space in its name. Fixed.
 - Owner asked for automatic operation: summaries now run from a detached background process (D86), verified in one real `claude -p` session. Summaries are on in the installed copy (D88). Voyage AI declined for now (D89).
 - Defect found while building: the daily limit counted stored summaries instead of requests. Fixed.
+- Several Claude Code accounts supported (D90); installed copy set to the owner's active account (D91).
+- Import of 12,800 synthetic pieces: about 39 s before, about 8 s after (D92, D93). Four unexplained slow runs are recorded in `P2-C.md`.
 
 ## Earlier session record (session 15, 2026-11-20)
 

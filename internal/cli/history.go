@@ -118,6 +118,7 @@ func historyCmd(inv invocation, rest []string) error {
 		env := st.env(inv.getenv)
 		perProject, folders := map[string]int{}, map[string]int{}
 		sessions, liveSeen := map[string]bool{}, map[string]bool{}
+		decided := map[string]project.Decision{}
 
 		for _, path := range files {
 			f, err := os.Open(path)
@@ -127,7 +128,13 @@ func historyCmd(inv invocation, rest []string) error {
 			}
 			var pending []store.IngestInput
 			stats, perr := history.Parse(f, func(t history.Turn) {
-				d := project.Decide(env, settings, roots, t.Cwd)
+				// A session has thousands of pieces and a handful of folders; deciding once per
+				// folder avoids looking for a repository root on disk for every piece.
+				d, known := decided[t.Cwd]
+				if !known {
+					d = project.Decide(env, settings, roots, t.Cwd)
+					decided[t.Cwd] = d
+				}
 				switch {
 				case d.Reason == "excluded by the user":
 					rep.Excluded++
@@ -193,10 +200,13 @@ func historyCmd(inv invocation, rest []string) error {
 			for i := range pending {
 				pending[i].ReceivedAt = now
 				pending[i].EndsSession = i == len(pending)-1 // an imported session is over
-				res, err := s.IngestEvent(ctx, pending[i])
-				if err != nil {
-					return fmt.Errorf("store imported text from %s: %w", filepath.Base(path), err)
-				}
+			}
+			// One transaction per session file: the whole session is stored, or none of it.
+			results, err := s.IngestEvents(ctx, pending)
+			if err != nil {
+				return fmt.Errorf("store imported text from %s: %w", filepath.Base(path), err)
+			}
+			for _, res := range results {
 				switch res.Outcome {
 				case store.Inserted:
 					rep.Stored++

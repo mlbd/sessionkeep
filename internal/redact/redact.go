@@ -54,13 +54,96 @@ var (
 // replacements were made. Text(Text(s)) equals Text(s).
 func Text(s string) (string, int) { return text(s, true) }
 
+// A need is a cheap test that must hold before a rule can possibly match: the text, in lower
+// case, contains one of `any` and all of `all`. Running seventeen expressions over every piece
+// of text cost 0.4 ms per 700 bytes; most text contains none of these strings, so most
+// expressions are skipped. A need only ever skips an expression that could not have matched:
+// TestNeedsNeverChangeTheResult and FuzzNeedsNeverChangeTheResult compare against running
+// everything.
+type need struct{ any, all []string }
+
+func (n need) possible(lower string) bool {
+	for _, x := range n.all {
+		if !strings.Contains(lower, x) {
+			return false
+		}
+	}
+	for _, x := range n.any {
+		if strings.Contains(lower, x) {
+			return true
+		}
+	}
+	return len(n.any) == 0
+}
+
+// needs is parallel to rules.
+var needs = []need{
+	{any: []string{"<private>"}},
+	{any: []string{"private key-----"}},
+	{any: []string{"private key-----"}},
+	{any: []string{"authorization"}},
+	{any: []string{"bearer"}},
+	{all: []string{"://", "@"}},
+	{any: []string{"-u"}},
+	{any: []string{"--"}},
+	{any: []string{"eyj"}},
+	{any: []string{"sk-", "sk_", "rk-", "rk_", "pk-", "pk_"}},
+	{any: []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_"}},
+	{any: []string{"github_pat_"}},
+	{any: []string{"akia", "asia"}},
+	{any: []string{"xox"}},
+	{any: []string{"aiza"}},
+}
+
+var assignNeed = need{any: []string{"password", "passwd", "pwd", "secret", "token", "key", "credential"}}
+
+// useNeeds is switched off only by tests, to compare results.
+var useNeeds = true
+
+// lowerFor returns the text in lower case for the needs, or ok=false when the needs must not be
+// used: case-insensitive expressions also match two non-ASCII letters (the long s, U+017F, and
+// the Kelvin sign, U+212A) that lower-casing does not reliably turn into "s" and "k".
+func lowerFor(s string) (string, bool) {
+	if !useNeeds || strings.ContainsRune(s, 0x017f) || strings.ContainsRune(s, 0x212a) {
+		return "", false
+	}
+	return strings.ToLower(s), true
+}
+
+// hasRun reports whether s holds at least min consecutive base64 characters.
+func hasRun(s string, min int) bool {
+	run := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '+' || c == '/' || c == '_' || c == '-' {
+			if run++; run >= min {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
+}
+
 func text(s string, decode bool) (string, int) {
 	n := 0
-	for _, r := range rules {
+	lower, fast := lowerFor(s)
+	for i, r := range rules {
+		if fast && !needs[i].possible(lower) {
+			continue
+		}
+		before := n
 		s = r.re.ReplaceAllStringFunc(s, func(m string) string {
 			n++
 			return r.re.ReplaceAllString(m, r.repl)
 		})
+		if n != before { // the text changed: the needs must look at the new text
+			lower, fast = lowerFor(s)
+		}
+	}
+	if fast && !assignNeed.possible(lower) && (!decode || !hasRun(s, 24)) {
+		return s, n
 	}
 	s = assign.ReplaceAllStringFunc(s, func(m string) string {
 		g := assign.FindStringSubmatch(m)

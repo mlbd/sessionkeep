@@ -108,3 +108,43 @@ func TestDeletingAProjectDeletesItsSummaries(t *testing.T) {
 		t.Fatalf("after compaction the summary index holds %d match(es), want 1", len(hits))
 	}
 }
+
+func batchEvent(n int, evidenceID string) IngestInput {
+	id := string(rune('a' + n))
+	return IngestInput{EventID: "bev-" + id, EventKey: "batch:" + id, DeviceID: "dev-1", ProjectID: "proj-A", Agent: "claude-code", SessionExternal: "ext-batch",
+		NewSessionID: "sess-batch", AdapterVersion: 1, Kind: "user_prompt", ObservedAt: "2026-11-19T00:00:00.000000000Z", ReceivedAt: "2026-11-19T00:00:01.000000000Z",
+		SafePayload: "{}", RedactionStatus: "none", EndsSession: n == 2,
+		Evidence: &EvidenceRow{ID: evidenceID, Origin: "transcript", Locator: "loc-" + id, Text: "batch text " + id, Completeness: "complete", Trust: "user"}}
+}
+
+func TestIngestEventsStoresAWholeBatchOrNothing(t *testing.T) {
+	s, _ := openTemp(t)
+	seed(t, s)
+	count := func() (n int) {
+		s.db.QueryRow("select count(*) from events where event_key like 'batch:%'").Scan(&n)
+		return
+	}
+	// The third event reuses the first one's evidence id, which the database refuses.
+	if _, err := s.IngestEvents(ctx, []IngestInput{batchEvent(0, "be-0"), batchEvent(1, "be-1"), batchEvent(2, "be-0")}); err == nil {
+		t.Fatal("a batch with a bad event was accepted")
+	}
+	var sessions int
+	s.db.QueryRow("select count(*) from sessions where external_session_id = 'ext-batch'").Scan(&sessions)
+	if count() != 0 || sessions != 0 {
+		t.Fatalf("after a failed batch: %d event(s) and %d session(s) remain, want none", count(), sessions)
+	}
+	res, err := s.IngestEvents(ctx, []IngestInput{batchEvent(0, "be-0"), batchEvent(1, "be-1"), batchEvent(2, "be-2")})
+	if err != nil || len(res) != 3 || res[0].Outcome != Inserted || res[2].Outcome != Inserted || count() != 3 {
+		t.Fatalf("batch: %+v, %v, %d stored", res, err, count())
+	}
+	var state string
+	s.db.QueryRow("select state from sessions where external_session_id = 'ext-batch'").Scan(&state)
+	if state != "ended" {
+		t.Errorf("session state %q, want ended", state)
+	}
+	// The same batch again plus one new event: three replays, one insert.
+	res, err = s.IngestEvents(ctx, []IngestInput{batchEvent(0, "be-0"), batchEvent(1, "be-1"), batchEvent(2, "be-2"), batchEvent(3, "be-3")})
+	if err != nil || res[0].Outcome != Replayed || res[2].Outcome != Replayed || res[3].Outcome != Inserted || count() != 4 {
+		t.Fatalf("replayed batch: %+v, %v, %d stored", res, err, count())
+	}
+}

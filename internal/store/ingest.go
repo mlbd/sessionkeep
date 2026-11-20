@@ -62,7 +62,41 @@ func (s *Store) IngestEvent(ctx context.Context, in IngestInput) (IngestResult, 
 		return IngestResult{}, err
 	}
 	defer tx.Rollback()
+	res, err := ingestTx(ctx, tx, in)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return IngestResult{}, err
+	}
+	return res, nil
+}
 
+// IngestEvents stores several events in one transaction: all of them or, on any error, none.
+// It is for bulk work such as importing a whole earlier session, where one durable write per
+// event would be needlessly slow. Events already stored are reported as replayed, as usual.
+func (s *Store) IngestEvents(ctx context.Context, ins []IngestInput) ([]IngestResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	out := make([]IngestResult, 0, len(ins))
+	for _, in := range ins {
+		res, err := ingestTx(ctx, tx, in)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ingestTx(ctx context.Context, tx *sql.Tx, in IngestInput) (IngestResult, error) {
+	var err error
 	var seen int
 	if err := tx.QueryRowContext(ctx, `select count(*) from events where event_key = ?`, in.EventKey).Scan(&seen); err != nil {
 		return IngestResult{}, err
@@ -126,9 +160,6 @@ func (s *Store) IngestEvent(ctx context.Context, in IngestInput) (IngestResult, 
 	if _, err := tx.ExecContext(ctx, `insert into events(id,project_id,session_id,event_key,kind,observed_at,received_at,payload_version,safe_payload,evidence_id,redaction_status)
 		values(?,?,?,?,?,?,?,?,?,?,?)`, in.EventID, res.ProjectID, sessionID, in.EventKey, in.Kind, in.ObservedAt, in.ReceivedAt, in.AdapterVersion, in.SafePayload, evidenceID, in.RedactionStatus); err != nil {
 		return IngestResult{}, fmt.Errorf("store event: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return IngestResult{}, err
 	}
 	return res, nil
 }
