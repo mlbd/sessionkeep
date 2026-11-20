@@ -1,9 +1,10 @@
 # Project status
 
-**Last updated:** 2026-11-20 (session 17) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.6.0 installed on the owner's computer, plugin not yet enabled in Claude Code** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-20 (session 18) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), part A built; **version 0.7.0 installed on the owner's computer through the npm package, plugin turned on in the owner's active Claude Code account (D107); no session has run with it yet** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
+- `evidence/npm/N-A.md` — session 18: the npm package, the plugin step, sandbox and real install runs.
 - `evidence/phase-3/P3-A.md` — session 17: claims with a checked source, safe page fetching, staleness; what is not built yet.
 - `evidence/phase-2/P2-C.md` — session 16: import speed measured and improved; secret removal made 37 times faster with equivalence checks.
 - `evidence/phase-2/P2-B.md` — session 16: automatic session summaries through the owner's Claude Code sign-in; three real requests made (section 4).
@@ -28,19 +29,28 @@
 
 ## State of the owner's computer
 
-- `sessionkeep 0.6.0` is installed, with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.7.0` is installed by `npm install -g dist/sessionkeep-0.7.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). **No project is registered, so nothing is saved yet.**
-- **The plugin is not enabled in Claude Code.** The two commands printed by `sessionkeep install` are the owner's step (D48). The installed copy is set to the owner's active (second) account (D91). No auto-start entry exists.
+- **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local` 0.7.0, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
 
 ## What has not happened
 
-- No real Claude Code session has run with the installed plugin. No real import of earlier sessions has been run (only a preview that stored nothing).
+- No real Claude Code session has run with the plugin yet (it was turned on during session 18; Claude Code must be restarted). No real import of earlier sessions has been run (only a preview that stored nothing).
 - The owner has not seen the redesigned dashboard.
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 17, 2026-11-20)
+## Latest session record (session 18, 2026-11-20)
+
+- Agent: Claude Code (claude-fable-5-2). Owner asked whether SessionKeep can be installed with npm and set up behind the scenes, then: "go with your recommendation, build it locally first".
+- Built the npm package (not published) and `sessionkeep install --enable-plugin`. Record: `evidence/npm/N-A.md`. Decisions D105–D110; D48 and D65 changed by the owner (D107).
+- `bash scripts/check.sh` → **CHECK PASSED** (now includes the wrapper's tests) before commit `f088d69`.
+- Sandbox runs with real npm and real Claude Code: normal install, scripts skipped, Claude Code missing, reinstall, removal. All behaved as designed.
+- Real install on the owner's computer from the clean commit: npm exit 0; `sessionkeep 0.7.0`, doctor 6 ok, summaries / research / account settings kept; plugin enabled in the active account only.
+- Phase 3 part B was not started; it is still the next task.
+
+## Session 17 record (2026-11-20)
 
 - Agent: Claude Code (claude-fable-5-2). Owner: "accept Phase 2, lets move to next" (D94).
 - Built Phase 3 part A (P3-01, P3-02, most of P3-03). Record: `evidence/phase-3/P3-A.md`. Decisions D94–D104.
@@ -77,7 +87,8 @@ Real daily use with the installed plugin; a full history import on real data and
 
 ## Blockers / awaiting owner
 
-1. Enable the plugin: run the two plugin commands that `sessionkeep install` prints for the active account (`docs/FIRST_USE.md`), then register projects.
+1. Restart Claude Code so the plugin loads, then register projects (`sessionkeep project add . --capture conversation`, or automatic mode). Nothing is saved before that.
+1a. npm package: decide whether and under which name and licence to publish it (D106). macOS and Linux builds have never been run.
 2. Look at the redesigned dashboard and say whether it is what was wanted (D73).
 3. Confirm or overrule D74 (screenshots) and D78 (Phase 1 gate read as accepted for a private pilot).
 4. Summaries are on in the installed copy (Sonnet). Say if Opus is wanted, or change it on the Overview page. Judge the quality of the first real summaries.

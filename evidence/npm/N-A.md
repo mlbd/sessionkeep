@@ -41,7 +41,19 @@ The owner's own account and npm folder were not touched in these runs.
 npm printed a notice in every run: install scripts are "not yet covered by allowScripts". The
 script ran anyway in npm 11.19.
 
-## 4. Not built, not verified
+## 4. The real install (owner's computer)
+
+Built from the clean commit `f088d69`, then `npm install -g --foreground-scripts dist/sessionkeep-0.7.0.tgz`:
+
+- npm exit 0; the setup step printed "installed sessionkeep 0.7.0" and "The plugin is turned on in
+  Claude Code" for the owner's active account.
+- `sessionkeep` resolves on PATH; `sessionkeep version` → 0.7.0, commit f088d696f068; doctor: 6 ok.
+- Kept from before: summaries on (sonnet, 20 a day), research fetching on, chosen account.
+- `plugin list` for that account: `sessionkeep@sessionkeep-local` 0.7.0, enabled. The default
+  account's settings file does not mention sessionkeep.
+- Not yet seen: a Claude Code session with the plugin loaded.
+
+## 5. Not built, not verified
 
 - Nothing is published; `npx sessionkeep` from the registry does not exist.
 - The macOS and Linux programs build (`all`) but have never been run, and neither has the
