@@ -292,6 +292,13 @@ func forgetCmd(inv invocation, rest []string) error {
 		if kind != "record" {
 			dropSpooled(st.paths, proj.ID)
 		}
+		// Exchanges kept for giving back after a compaction go too. One record cannot be picked
+		// out of them, so deleting a record clears them all.
+		if kind == "record" {
+			instruct.RemoveRecent(st.paths, "")
+		} else {
+			instruct.RemoveRecent(st.paths, proj.ID)
+		}
 		if kind == "project" {
 			instruct.RemoveCache(st.paths, proj.ID)
 		}

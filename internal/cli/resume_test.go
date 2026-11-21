@@ -4,12 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf16"
+
+	"sessionkeep/internal/config"
 )
 
 func gitRun(t *testing.T, dir string, args ...string) {
@@ -185,4 +189,101 @@ func TestLatestCheckpointIsDeliveredAtSessionStart(t *testing.T) {
 	if ctx := sb.inject("SessionStart", "s5", a); ctx != "" {
 		t.Fatalf("a deleted project's checkpoint is still delivered: %q", ctx)
 	}
+}
+
+// compactStart runs the session start that follows a compaction and returns what Claude receives.
+func (sb *sandbox) compactStart(session, cwd string) string {
+	sb.t.Helper()
+	raw, _ := json.Marshal(map[string]string{"session_id": session, "cwd": cwd, "hook_event_name": "SessionStart", "source": "compact"})
+	code, out, errOut := sb.hook("SessionStart", string(raw))
+	if code != ExitOK || errOut != "" {
+		sb.t.Fatalf("hook: exit %d stderr %q", code, errOut)
+	}
+	if out == "" {
+		return ""
+	}
+	var resp struct {
+		HookSpecificOutput struct {
+			AdditionalContext string `json:"additionalContext"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		sb.t.Fatalf("hook output is not one JSON document: %v: %q", err, out)
+	}
+	return resp.HookSpecificOutput.AdditionalContext
+}
+
+// After a compaction the model is left with a summary. The start that follows gives it the last
+// exchanges word for word, before anything was ingested, beside the instructions.
+func TestTheLastExchangesComeBackWordForWordAfterACompaction(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	sb.ok("project", "add", app, "--capture", "conversation")
+	sb.remember("project", "Always use tabs TABRULE.", "--project", app)
+
+	sb.say("UserPromptSubmit", "s-1", app, "Build the invoice page FIRSTASK.")
+	sb.say("Stop", "s-1", app, "Done, the page exists.")
+	for i := 0; i < 4; i++ {
+		sb.say("UserPromptSubmit", "s-1", app, fmt.Sprintf("Follow-up %d.", i))
+		sb.say("Stop", "s-1", app, fmt.Sprintf("Answer %d.", i))
+	}
+	sb.say("UserPromptSubmit", "s-1", app, "Now fix the total, my key is AKIAIOSFODNN7EXAMPLE LASTASK.")
+	sb.say("UserPromptSubmit", "s-other", app, "Another session OTHERMARK.")
+
+	if got := sb.inject("SessionStart", "s-1", app); strings.Contains(got, "LASTASK") || !strings.Contains(got, "TABRULE") {
+		t.Fatalf("an ordinary start should carry the instructions and no exchanges: %q", got)
+	}
+	got := sb.compactStart("s-1", app)
+	for _, want := range []string{"TABRULE", "LASTASK", "Answer 3.", "FIRSTASK", "word for word"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the start after a compaction lacks %q:\n%s", want, got)
+		}
+	}
+	for _, not := range []string{"AKIAIOSFODNN7EXAMPLE", "OTHERMARK", "Follow-up 0."} {
+		if strings.Contains(got, not) {
+			t.Errorf("the start after a compaction contains %q:\n%s", not, got)
+		}
+	}
+	if strings.Index(got, "FIRSTASK") > strings.Index(got, "LASTASK") || strings.Index(got, "TABRULE") > strings.Index(got, "FIRSTASK") {
+		t.Errorf("order should be instructions, first request, newest last:\n%s", got)
+	}
+	if n := len(utf16.Encode([]rune(got))); n > 9000 {
+		t.Fatalf("the message is %d units long, over the limit", n)
+	}
+
+	// Long exchanges are dropped oldest first; the message never passes the limit.
+	big := strings.Repeat("word ", 2000)
+	for i := 0; i < 8; i++ {
+		sb.say("UserPromptSubmit", "s-1", app, fmt.Sprintf("BIG%d %s", i, big))
+	}
+	got = sb.compactStart("s-1", app)
+	if n := len(utf16.Encode([]rune(got))); n > 9000 || !strings.Contains(got, "BIG7") || !strings.Contains(got, "TABRULE") {
+		t.Fatalf("long exchanges: %d units, newest kept %v, instructions kept %v", n, strings.Contains(got, "BIG7"), strings.Contains(got, "TABRULE"))
+	}
+
+	// Deleting the project's captured text removes what could be given back.
+	sb.ok("ingest")
+	sb.ok("forget", "captured", "--project", app, "--yes")
+	if got := sb.compactStart("s-1", app); strings.Contains(got, "BIG7") || strings.Contains(got, "LASTASK") {
+		t.Fatalf("deleted text came back after a compaction: %.300q", got)
+	}
+}
+
+// A project that saves no text keeps no exchanges and gives none back.
+func TestNoExchangesAreKeptWhereTextIsNotSaved(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	sb.ok("project", "add", app, "--capture", "metadata")
+	sb.say("UserPromptSubmit", "s-1", app, "A private question METAMARK.")
+	if got := sb.compactStart("s-1", app); got != "" {
+		t.Fatalf("a text-free project received %q", got)
+	}
+	filepath.Walk(sb.env[config.EnvDataDir], func(p string, fi os.FileInfo, err error) error {
+		if err == nil && !fi.IsDir() {
+			if raw, _ := os.ReadFile(p); strings.Contains(string(raw), "METAMARK") {
+				t.Errorf("the prompt was written to %s", p)
+			}
+		}
+		return nil
+	})
 }

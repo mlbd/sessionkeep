@@ -159,7 +159,7 @@ func Handle(req Request) (res Result) {
 
 	// Recall is independent of capture: a registered project gets its recorded instructions even
 	// while capture is paused or off. Excluded and unregistered folders get nothing.
-	recall := recallContext(req, in.SessionID, d)
+	recall := recallContext(req, in, d)
 
 	switch d.Action {
 	case project.ActionCapture, project.ActionAutoRegister:
@@ -201,13 +201,25 @@ func Handle(req Request) (res Result) {
 	if err := writeDurable(req.Paths.SpoolDir, name, raw); err != nil {
 		return Result{Action: d.Action, Stdout: recall, Gap: gap(req, "spool_write_failed")}
 	}
+	// Keep the exchange for the hook path too, so it can be given back after a compaction.
+	if d.ProjectID != "" {
+		if s, _ := ev.Payload["prompt"].(string); req.HookEvent == "UserPromptSubmit" {
+			instruct.NoteTurn(req.Paths, in.SessionID, d.ProjectID, "user", s, req.Now)
+		}
+		if s, _ := ev.Payload["text"].(string); req.HookEvent == "Stop" {
+			instruct.NoteTurn(req.Paths, in.SessionID, d.ProjectID, "assistant", s, req.Now)
+		}
+	}
 	return Result{Action: d.Action, Stdout: recall, SpoolFile: filepath.Join(req.Paths.SpoolDir, name)}
 }
 
 // recallContext returns the hook response carrying the user's recorded instructions, or nil.
 // SessionStart always sends them (that also covers resume and the restart after compaction).
 // UserPromptSubmit sends them only when the set changed since it was last sent in this session.
-func recallContext(req Request, session string, d project.Decision) []byte {
+// A start that follows a compaction also gets the session's last exchanges word for word, when
+// the project saves text: the model is otherwise left with a summary of them only.
+func recallContext(req Request, in hookInput, d project.Decision) []byte {
+	session := in.SessionID
 	if req.HookEvent != "SessionStart" && req.HookEvent != "UserPromptSubmit" {
 		return nil
 	}
@@ -230,23 +242,28 @@ func recallContext(req Request, session string, d project.Decision) []byte {
 		// Do not let a damaged file look like "the user recorded nothing".
 		return respond("SessionKeep is a local memory tool this user installed. The user's recorded instructions could not be read in this session (the local cache file is damaged). Their content is not known here; the user can repair it by running: sessionkeep setup")
 	}
-	if cache == nil {
-		return nil
+	text := ""
+	if cache != nil {
+		digest := instruct.SetDigest(cache.Items)
+		if req.HookEvent == "UserPromptSubmit" && instruct.AlreadySent(req.Paths, session, digest) {
+			return nil
+		}
+		// The note about stale researched facts is given once, when the session starts.
+		var at time.Time
+		if req.HookEvent == "SessionStart" {
+			at = req.Now
+		}
+		if text, _ = instruct.Envelope(cache, at); text != "" {
+			instruct.MarkSent(req.Paths, session, digest)
+		}
 	}
-	digest := instruct.SetDigest(cache.Items)
-	if req.HookEvent == "UserPromptSubmit" && instruct.AlreadySent(req.Paths, session, digest) {
-		return nil
+	savesText := d.Level == config.LevelConversation || d.Level == config.LevelExtended
+	if req.HookEvent == "SessionStart" && in.Source == "compact" && d.Action == project.ActionCapture && savesText {
+		text = instruct.WithRecent(req.Paths, session, d.ProjectID, text)
 	}
-	// The note about stale researched facts is given once, when the session starts.
-	var at time.Time
-	if req.HookEvent == "SessionStart" {
-		at = req.Now
-	}
-	text, _ := instruct.Envelope(cache, at)
 	if text == "" {
 		return nil
 	}
-	instruct.MarkSent(req.Paths, session, digest)
 	return respond(text)
 }
 

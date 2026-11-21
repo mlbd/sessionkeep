@@ -430,16 +430,17 @@ func MarkSent(p config.Paths, session, setDigest string) {
 	}
 }
 
-// PruneSessionState removes per-session markers not touched for 30 days.
+// PruneSessionState removes per-session markers and kept exchanges not touched for 30 days.
 func PruneSessionState(p config.Paths, now time.Time) {
-	d := filepath.Join(p.CacheDir, "sessions")
-	entries, err := os.ReadDir(d)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > 30*24*time.Hour {
-			os.Remove(filepath.Join(d, e.Name()))
+	for _, d := range []string{filepath.Join(p.CacheDir, "sessions"), recentDir(p)} {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if fi, err := e.Info(); err == nil && now.Sub(fi.ModTime()) > 30*24*time.Hour {
+				os.Remove(filepath.Join(d, e.Name()))
+			}
 		}
 	}
 }
