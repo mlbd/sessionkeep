@@ -2,7 +2,11 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -122,5 +126,77 @@ func TestDashboardSessionsAPI(t *testing.T) {
 	stranger := &browser{t: t, base: b.base}
 	if code := stranger.do("GET", "/api/sessions?all=1", nil, nil, nil); code != http.StatusUnauthorized {
 		t.Errorf("unsigned request: status %d, want 401", code)
+	}
+}
+
+// Every session can be listed, a page at a time, without one being skipped or shown twice.
+func TestEverySessionCanBeListedInPages(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	sb.ok("project", "add", app, "--capture", "conversation")
+	for i := 0; i < 7; i++ {
+		sb.say("UserPromptSubmit", fmt.Sprintf("s-%d", i), app, fmt.Sprintf("Question number %d.", i))
+	}
+	sb.ok("ingest")
+	seen := map[string]bool{}
+	for offset := 0; ; offset += 3 {
+		page := sb.sessions("--project", app, "--limit", "3", "--offset", strconv.Itoa(offset))
+		for _, s := range page {
+			if seen[s.ID] {
+				t.Fatalf("session %s listed twice", s.ID)
+			}
+			seen[s.ID] = true
+		}
+		if len(page) < 3 {
+			break
+		}
+	}
+	if len(seen) != 7 {
+		t.Fatalf("paging listed %d sessions, want 7", len(seen))
+	}
+	if code, _, _ := sb.run("session", "list", "--project", app, "--offset", "-1"); code != ExitUsage {
+		t.Fatalf("a negative offset was accepted (exit %d)", code)
+	}
+}
+
+// What SessionKeep saved stays when Claude Code clears a conversation (/clear, also typed as /reset
+// or /new) and when Claude Code's own session files are deleted afterwards.
+func TestSavedSessionsOutliveAClearAndTheLossOfClaudeCodesFiles(t *testing.T) {
+	sb := newSandbox(t)
+	app := sb.dir("app")
+	sb.ok("project", "add", app, "--capture", "conversation")
+	from := sb.claudeFiles(fakeTurn{"old-1", "u1", app, "user", "Imported question IMPORTMARK."})
+	if h := sb.history(ExitOK, "--from", from, "--yes"); h.Data.Stored != 1 {
+		t.Fatalf("import stored %d pieces, want 1", h.Data.Stored)
+	}
+
+	sb.say("UserPromptSubmit", "live-1", app, "Live question KEEPMARK.")
+	sb.say("Stop", "live-1", app, "Live answer.")
+	// The conversation is cleared: the old session ends with that reason and a new one starts.
+	for _, e := range []map[string]string{
+		{"hook_event_name": "SessionEnd", "session_id": "live-1", "cwd": app, "reason": "clear"},
+		{"hook_event_name": "SessionStart", "session_id": "live-2", "cwd": app, "source": "clear"},
+	} {
+		raw, _ := json.Marshal(e)
+		if code, _, errOut := sb.hook(e["hook_event_name"], string(raw)); code != ExitOK || errOut != "" {
+			t.Fatalf("hook %s: %d %q", e["hook_event_name"], code, errOut)
+		}
+	}
+	sb.say("UserPromptSubmit", "live-2", app, "After the clear.")
+	sb.ok("ingest")
+
+	// Claude Code's own files disappear, and the import is run again against the empty folder.
+	if err := os.RemoveAll(filepath.Join(from, "projects", "some-folder")); err != nil {
+		t.Fatal(err)
+	}
+	sb.history(ExitOK, "--from", from, "--yes")
+
+	if list := sb.sessions("--project", app); len(list) != 3 {
+		t.Fatalf("%d sessions are listed after the clear and the loss of the files, want 3: %+v", len(list), list)
+	}
+	for _, word := range []string{"KEEPMARK", "IMPORTMARK"} {
+		if hits := sb.search(word, "--project", app).Data.Hits; len(hits) != 1 {
+			t.Fatalf("%s is found %d times after the clear, want once", word, len(hits))
+		}
 	}
 }

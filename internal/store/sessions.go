@@ -52,7 +52,12 @@ func scanSessions(rows *sql.Rows) ([]SessionInfo, error) {
 
 // Sessions lists sessions, newest first. An empty projectID lists every project's sessions and
 // is only for the owner's own views.
-func (s *Store) Sessions(ctx context.Context, projectID string, limit int) ([]SessionInfo, error) {
+// Sessions lists sessions newest first. offset skips that many, so a caller can read every one
+// of them a page at a time.
+func (s *Store) Sessions(ctx context.Context, projectID string, limit, offset int) ([]SessionInfo, error) {
+	if offset < 0 {
+		offset = 0
+	}
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -61,7 +66,7 @@ func (s *Store) Sessions(ctx context.Context, projectID string, limit int) ([]Se
 		q += ` where s.project_id = ?`
 		args = append(args, projectID)
 	}
-	rows, err := s.db.QueryContext(ctx, q+` order by julianday(s.started_at) desc, s.id limit ?`, append(args, limit)...)
+	rows, err := s.db.QueryContext(ctx, q+` order by julianday(s.started_at) desc, s.id limit ? offset ?`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, err
 	}

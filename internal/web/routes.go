@@ -132,6 +132,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 			}
 			args = append(args, flag("limit", v))
 		}
+		if v := q.Get("offset"); v != "" {
+			if _, err := strconv.Atoi(v); err != nil {
+				fail(w, http.StatusBadRequest, "usage", "offset must be a number")
+				return
+			}
+			args = append(args, flag("offset", v))
+		}
 		s.command(w, args...)
 	})
 	mux.HandleFunc("GET /api/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {

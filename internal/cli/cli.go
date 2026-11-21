@@ -177,7 +177,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -808,11 +808,11 @@ func projectCmd(inv invocation, rest []string) error {
 
 // sessionCmd lists captured sessions and shows one in full. Read-only.
 func sessionCmd(inv invocation, rest []string) error {
-	if err := inv.only("project", "all-projects", "limit"); err != nil {
+	if err := inv.only("project", "all-projects", "limit", "offset"); err != nil {
 		return err
 	}
 	if !(len(rest) == 1 && rest[0] == "list") && !(len(rest) == 2 && rest[0] == "show") {
-		return usageErr("usage: sessionkeep session list [--project ID_OR_PATH | --all-projects] [--limit N]\n       sessionkeep session show ID [--project ID_OR_PATH | --all-projects]")
+		return usageErr("usage: sessionkeep session list [--project ID_OR_PATH | --all-projects] [--limit N] [--offset N]\n       sessionkeep session show ID [--project ID_OR_PATH | --all-projects]")
 	}
 	all := inv.flags["all-projects"] != ""
 	if all && inv.flags["project"] != "" {
@@ -844,7 +844,13 @@ func sessionCmd(inv invocation, rest []string) error {
 				return usageErr("--limit must be a positive number (got %q)", v)
 			}
 		}
-		list, err := s.Sessions(ctx, proj.ID, limit)
+		offset := 0
+		if v := inv.flags["offset"]; v != "" {
+			if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
+				return usageErr("--offset must be zero or a positive number (got %q)", v)
+			}
+		}
+		list, err := s.Sessions(ctx, proj.ID, limit, offset)
 		if err != nil {
 			return err
 		}

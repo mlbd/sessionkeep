@@ -439,10 +439,15 @@ async function historyView(pid, sid, mode, rid) {
   if (!pr.ok) return say(problem(pr), 'bad');
   if (!projects.length) { lede.textContent = 'Sessions appear here once a project is being saved.'; return; }
   if (sid && mode === 'read') return sessionView(pid, sid, rid);
-  const r = await api('GET', `/api/sessions?${scope === '*' ? 'all=1' : 'project=' + enc(scope)}&limit=100`);
-  if (!r.ok) return say(problem(r), 'bad');
-  const all = r.data;
-  lede.textContent = `${plural(all.length, 'session', 'sessions')} in ${scopeName()}, newest first.` + (all.length === 100 ? ' Only the newest 100 are listed.' : '');
+  // Every saved session, read 200 at a time.
+  const all = [];
+  for (let page = 0; page < 100; page++) {
+    const r = await api('GET', `/api/sessions?${scope === '*' ? 'all=1' : 'project=' + enc(scope)}&limit=200&offset=${all.length}`);
+    if (!r.ok) return say(problem(r), 'bad');
+    all.push(...r.data);
+    if (r.data.length < 200) break;
+  }
+  lede.textContent = `All ${plural(all.length, 'saved session', 'saved sessions')} in ${scopeName()}, newest first. They stay here when Claude Code clears or deletes its own copy.`;
   view.className = 'wide';
   let chosen = '', filter = 'all';
   const list = el('div', { class: 'rows' });
