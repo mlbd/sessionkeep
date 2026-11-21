@@ -63,6 +63,11 @@ Usage:
   sessionkeep recap [today|yesterday|week|YYYY-MM-DD] [--project ID_OR_PATH | --all-projects]
                                    What was done in a day: sessions with their first request
                                    and last reply, checkpoints and commits. Reads only
+  sessionkeep file PATH                The sessions that changed a file: what was asked, what was
+                                   answered. Reads only
+  sessionkeep why COMMIT | FILE:LINE   The conversation behind a commit, or behind the commit that
+                                   last changed a line: the sessions that changed its files in
+                                   the week before it. Reads only; changes nothing in Git
   sessionkeep checkpoint "TEXT"        Record where work stands (what is done, what is next) with the
                                    current Git branch, commit and uncommitted state
   sessionkeep resume                   Print a continuation pack: instructions, latest checkpoint, a
@@ -351,6 +356,10 @@ func dispatch(inv invocation) error {
 		return researchCmd(inv, rest)
 	case "recap":
 		return recapCmd(inv, rest)
+	case "file":
+		return fileCmd(inv, rest)
+	case "why":
+		return whyCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":

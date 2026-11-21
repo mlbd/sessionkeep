@@ -205,3 +205,49 @@ func Commits(dir string, since, until time.Time, limit int) []Commit {
 	}
 	return out
 }
+
+// CommitInfo returns one commit and the files it changed (paths from the repository root).
+// rev must already be checked by the caller to be a plain revision name.
+func CommitInfo(dir, rev string) (Commit, []string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	raw, err := git(ctx, dir, "show", "--no-patch", "--format=%h%x09%cI%x09%s", "--end-of-options", rev+"^{commit}")
+	if err != nil {
+		return Commit{}, nil, err
+	}
+	f := strings.SplitN(strings.TrimSpace(string(raw)), "\t", 3)
+	if len(f) != 3 {
+		return Commit{}, nil, fmt.Errorf("unexpected answer from git")
+	}
+	at, err := time.Parse(time.RFC3339, f[1])
+	if err != nil {
+		return Commit{}, nil, err
+	}
+	c := Commit{ID: f[0], At: at.UTC().Format(time.RFC3339), Subject: f[2]}
+	names, err := git(ctx, dir, "show", "--no-renames", "--name-only", "--format=", "--end-of-options", rev+"^{commit}")
+	if err != nil {
+		return c, nil, err
+	}
+	files := []string{}
+	for _, n := range strings.Split(string(names), "\n") {
+		if n = strings.TrimSpace(n); n != "" {
+			files = append(files, n)
+		}
+	}
+	return c, files, nil
+}
+
+// BlameLine returns the commit that last changed one line of a file.
+func BlameLine(dir, file string, line int) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	raw, err := git(ctx, dir, "blame", "--porcelain", fmt.Sprintf("-L%d,%d", line, line), "--", file)
+	if err != nil {
+		return "", err
+	}
+	id, _, _ := strings.Cut(string(raw), " ")
+	if len(id) < 40 || strings.Trim(id, "0") == "" {
+		return "", fmt.Errorf("the line is not committed yet")
+	}
+	return id, nil
+}
