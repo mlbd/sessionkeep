@@ -237,6 +237,36 @@ async function act(path, body, done) {
   return r;
 }
 
+// Brings one project up to date with what Claude Code has on this computer: first stores the
+// events that are still waiting, then looks in Claude Code's own session files for anything
+// that is not saved yet. What it found is shown before anything is imported.
+async function sync(p) {
+  say(`Looking for sessions of ${p.name} that are not saved yet. This can take a minute.`);
+  const waiting = await api('POST', '/api/ingest');
+  const stored = waiting.ok && waiting.data ? waiting.data.ingested || 0 : 0;
+  const r = await api('POST', '/api/history/import', { project: p.id, confirm: false });
+  if (r.status !== 409 || !r.data) return say(problem(r), 'bad');
+  const d = r.data;
+  if (!d.turns) {
+    if (stored) await reload();
+    return say((stored ? `Stored ${plural(stored, 'waiting event', 'waiting events')}. ` : '') + `Nothing else to bring in: everything Claude Code still has for ${p.name} is already saved.`, 'ok');
+  }
+  say('Nothing is imported yet.');
+  openDialog(`Bring ${p.name} up to date?`, [
+    el('p', {}, `Claude Code has ${plural(d.turns, 'piece of text', 'pieces of text')} from ${plural(d.sessions, 'session', 'sessions')} that SessionKeep has not saved.`),
+    el('p', { class: 'quiet small', text: `Left out: ${plural(d.sessions_captured_live_skipped, 'session', 'sessions')} already saved as they happened, ${d.turns_in_excluded_folders} pieces in excluded folders, ${d.turns_in_paused_or_text_free_projects} in paused or text-free projects. Claude\u2019s private reasoning, tool output and images are never imported.` }),
+  ], [
+    btn('Not now', 'btn', () => { dialog.close(); say(''); }),
+    btn(`Import ${plural(d.sessions, 'session', 'sessions')}`, 'btn primary', async () => {
+      const done = await api('POST', '/api/history/import', { project: p.id, confirm: true });
+      dialog.close();
+      if (!done.ok) return say(problem(done), 'bad');
+      await reload();
+      say(`Imported ${plural(done.data.stored, 'piece of text', 'pieces of text')} from ${plural(done.data.sessions, 'session', 'sessions')}.`, 'ok');
+    }),
+  ]);
+}
+
 // A checkpoint note written as "Done: / Next: / Blocking:" lines is shown in those three parts.
 function noteParts(note) {
   const parts = {};
@@ -449,6 +479,9 @@ async function historyView(pid, sid, mode, rid) {
   }
   lede.textContent = `All ${plural(all.length, 'saved session', 'saved sessions')} in ${scopeName()}, newest first. They stay here when Claude Code clears or deletes its own copy.`;
   view.className = 'wide';
+  const here = projects.find(p => p.id === scope);
+  if (here) actions.append(btn('Sync with Claude Code', 'btn', () => sync(here), `Bring in sessions of ${here.name} that are not saved yet`));
+  else actions.append(el('span', { class: 'quiet small', text: 'Choose a project in the sidebar to sync it with Claude Code.' }));
   let chosen = '', filter = 'all';
   const list = el('div', { class: 'rows' });
   const pane = el('section', { class: 'pane-read', 'aria-label': 'Session preview', 'aria-live': 'polite' });
@@ -801,6 +834,8 @@ async function projectsView(sel) {
       level,
       el('div', { class: 'row' }, btn('Change what is saved', 'btn', () => act(`/api/projects/${p.id}/capture`, { level: level.value() }, 'Changed.')),
         btn(p.paused ? 'Resume saving' : 'Pause saving', p.paused ? 'btn primary' : 'btn', () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Saving again.' : 'Paused.'))),
+      el('div', { class: 'row' }, btn('Sync with Claude Code', 'btn', () => sync(p), `Bring in sessions of ${p.name} that are not saved yet`),
+        el('span', { class: 'quiet small', text: 'Brings in sessions that are not saved yet. It shows what it found first.' })),
       el('p', { class: 'quiet small', text: 'Both of these show what would go and ask before deleting.' }),
       el('div', { class: 'row' }, btn('Delete saved conversations', 'btn danger', () => forget({ kind: 'captured', project: p.id }, again), `Delete saved conversations of ${p.name}`),
         btn('Delete the whole project', 'btn danger', () => forget({ kind: 'project', project: p.id }, again), `Delete project ${p.name}`))));
