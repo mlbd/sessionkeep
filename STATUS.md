@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-21 (session 19) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.9.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-21 (session 20) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.10.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
@@ -24,13 +24,13 @@
 - **Research (fetching off by default):** `research status|on|off|fetch|record|list|search|show|check|withdraw`; a claim is verified only by a quote SessionKeep found on a page it fetched, goes stale by category, and is disputed when the quote disappears. Stale and disputed claims are named at session start; `--applies-to PACKAGE@VERSION` is compared with the project's lock file.
 - **Accounts:** `account list|use|auto|plugins|enable|disable` for computers with more than one Claude Code sign-in (D90, D111).
 - **Data control:** `export`, `import [--dry-run]`, `forget record|captured|project`.
-- **Surfaces:** generated Claude Code plugin with four skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Projects, History, Search, Instructions, Research, Pick up work, Health).
+- **Surfaces:** generated Claude Code plugin with four skills, optional read-only MCP server, local dashboard (redesigned in session 15; pages: Overview, Pick up work, History, Search, Instructions, Research, Projects, Settings, Health; design "Margin", D115).
 - **Lifecycle:** `install`, `uninstall`, `autostart`, `doctor`, `status`, `paths`, `version`.
 - **Storage:** SQLite (modernc v1.62.0, SQLite 3.54.1) with engine gate; migrations 0001–0006.
 
 ## State of the owner's computer
 
-- `sessionkeep 0.9.0` is installed by `npm install -g dist/sessionkeep-0.9.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.10.0` is installed by `npm install -g dist/sessionkeep-0.10.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). The owner registered projects from the dashboard on 2026-11-21; an import preview there reported 4 sessions "already saved as they happened".
 - **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local`, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
@@ -43,7 +43,15 @@
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 19, 2026-11-21)
+## Latest session record (session 20, 2026-11-21)
+
+- Agent: Claude Code (claude-fable-5-2). Owner asked for a redesign, rejected the agent's five variants ("just changing color scheme"), asked for a prompt, designed five directions in Claude Design and chose "Margin".
+- Rebuilt `internal/web/ui` (index.html, app.css, app.js) to that design. Decision D115. `design/DESIGN_PROMPT.md` is the prompt the owner used.
+- Checks: `bash scripts/check.sh` -> CHECK PASSED. `.tools/smoke_ui.js` runs the real script against a stand-in page and stand-in answers (mock, not a browser): 43 page states visited and every button pressed without an exception. It found one fault on the way (the word "null" would have been printed under a session); fixed.
+- **Not verified: nobody has looked at the new dashboard in a browser.** Layout, spacing, dark theme and the narrow window are unseen. No server route changed.
+- Not built from the design: turns around a search result, a repair button on Health, settings that save without a button, a remembered theme.
+
+## Session 19 record (2026-11-21)
 
 - Agent: Claude Code (claude-fable-5-2). Owner: "Let's move next."
 - Built Phase 3 part B (P3-06, rest of P3-03). Record: `evidence/phase-3/P3-B.md`. Decisions D112–D114.
