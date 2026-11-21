@@ -103,6 +103,12 @@ Usage:
                                    it on. Run "sessionkeep research" for the forms
   sessionkeep export FILE              Write everything SessionKeep holds into one file (not encrypted)
   sessionkeep import FILE [--dry-run]  Check an export, or restore it into an empty data directory
+  sessionkeep handoff make FILE [--with-sessions] [--since DATE] [--from NAME] [--yes]
+  sessionkeep handoff receive FILE [--yes]
+                                   Give one project's memory to a teammate: its instructions,
+                                   checkpoints and, if you ask, what was said in its sessions,
+                                   in one readable file (not encrypted). Both show what would
+                                   happen first; receive adds it to a project you registered
   sessionkeep forget record ID | captured --project P | project P   [--yes]
                                    Permanently delete stored data; without --yes it only shows
                                    what would be deleted
@@ -229,7 +235,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due" || name == "with-sessions") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -374,6 +380,8 @@ func dispatch(inv invocation) error {
 		return exportCmd(inv, rest)
 	case "import":
 		return importCmd(inv, rest)
+	case "handoff":
+		return handoffCmd(inv, rest)
 	case "forget":
 		return forgetCmd(inv, rest)
 	case "dashboard":

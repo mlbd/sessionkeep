@@ -101,3 +101,21 @@ func (s *Store) RecentExchanges(ctx context.Context, projectID string, n, maxRun
 
 // ErrNoCheckpoint means the project has no checkpoint yet.
 var ErrNoCheckpoint = errors.New("no checkpoint recorded for this project")
+
+// ImportCheckpoint stores a checkpoint that was written elsewhere, keeping its own id and time.
+// It reports false when a checkpoint with that id is already stored.
+func (s *Store) ImportCheckpoint(ctx context.Context, c Checkpoint) (bool, error) {
+	null := func(v string) any {
+		if v == "" {
+			return nil
+		}
+		return v
+	}
+	res, err := s.db.ExecContext(ctx, `insert or ignore into checkpoints(id,project_id,note,git_repo,git_branch,git_head,changed_files,dirty_digest,created_at)
+		values(?,?,?,?,?,?,0,null,?)`, c.ID, c.ProjectID, c.Note, c.GitRepo, null(c.Branch), null(c.Head), c.CreatedAt)
+	if err != nil {
+		return false, fmt.Errorf("store checkpoint: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
