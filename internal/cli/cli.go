@@ -60,6 +60,9 @@ Usage:
                                    project unless you say otherwise.
   sessionkeep memory get ID            Show one stored record in full, with where it came from
   sessionkeep session list | show ID   Browse captured sessions and read one in full
+  sessionkeep recap [today|yesterday|week|YYYY-MM-DD] [--project ID_OR_PATH | --all-projects]
+                                   What was done in a day: sessions with their first request
+                                   and last reply, checkpoints and commits. Reads only
   sessionkeep checkpoint "TEXT"        Record where work stands (what is done, what is next) with the
                                    current Git branch, commit and uncommitted state
   sessionkeep resume                   Print a continuation pack: instructions, latest checkpoint, a
@@ -340,6 +343,8 @@ func dispatch(inv invocation) error {
 		return accountCmd(inv, rest)
 	case "research":
 		return researchCmd(inv, rest)
+	case "recap":
+		return recapCmd(inv, rest)
 	case "checkpoint":
 		return checkpointCmd(inv, rest)
 	case "resume":

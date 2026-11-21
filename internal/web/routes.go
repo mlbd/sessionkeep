@@ -145,6 +145,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 		q := r.URL.Query()
 		s.command(w, append(append([]string{"session", "show"}, scope(q.Get("project"), q.Get("all") == "1")...), "--", r.PathValue("id"))...)
 	})
+	mux.HandleFunc("GET /api/recap", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		day := q.Get("day")
+		if day == "" {
+			day = "today"
+		}
+		s.command(w, append(append([]string{"recap"}, scope(q.Get("project"), q.Get("all") == "1")...), "--", day)...)
+	})
 	mux.HandleFunc("GET /api/resume", func(w http.ResponseWriter, r *http.Request) {
 		s.command(w, "resume", flag("project", r.URL.Query().Get("project")))
 	})

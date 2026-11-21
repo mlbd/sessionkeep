@@ -170,3 +170,38 @@ func short(h string) string {
 	}
 	return h
 }
+
+// Commit is one commit, as listed for a span of time.
+type Commit struct {
+	ID      string `json:"id"`
+	At      string `json:"at"`
+	Subject string `json:"subject"`
+}
+
+// Commits lists the commits reachable from HEAD that were made in [since, until), oldest first,
+// at most limit. It returns an empty list where there is no repository or git is unavailable.
+func Commits(dir string, since, until time.Time, limit int) []Commit {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out := []Commit{}
+	raw, err := git(ctx, dir, "log", "--no-merges", fmt.Sprintf("--max-count=%d", limit*4),
+		"--since="+since.Add(-time.Second).UTC().Format(time.RFC3339), "--until="+until.UTC().Format(time.RFC3339), "--format=%h%x09%cI%x09%s")
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		f := strings.SplitN(line, "\t", 3)
+		if len(f) != 3 {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, f[1])
+		if err != nil || at.Before(since) || !at.Before(until) {
+			continue
+		}
+		out = append([]Commit{{ID: f[0], At: at.UTC().Format(time.RFC3339), Subject: f[2]}}, out...)
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
+}

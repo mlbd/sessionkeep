@@ -387,6 +387,41 @@ async function overview() {
   badge('n-overview', found.items.length, found.items.some(i => i.kind === 'bad') ? 'bad' : 'warn');
 }
 
+// ---- Recap ----------------------------------------------------------------------------------
+
+// What was done in a day, or in the last seven: sessions, checkpoints and commits per project.
+async function recapView(day) {
+  const DAYS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'Last 7 days']];
+  if (!DAYS.some(d => d[0] === day)) day = 'today';
+  actions.append(seg('Which days', DAYS, day, v => { location.hash = '#/recap/' + v; }));
+  const r = await api('GET', `/api/recap?day=${day}&${scope === '*' ? 'all=1' : 'project=' + enc(scope)}`);
+  if (!r.ok) return say(problem(r), 'bad');
+  const d = r.data;
+  lede.textContent = `${plural(d.sessions, 'session', 'sessions')} and ${plural(d.requests, 'request', 'requests')} in ${scopeName()}, ${d.label}.`;
+  if (!d.projects.length) {
+    return view.append(el('div', { class: 'empty' },
+      el('h2', { text: 'Nothing was saved in that time' }),
+      el('p', { class: 'quiet', text: 'No session, checkpoint or commit falls in these days. Choose other days above, or another project in the sidebar.' })));
+  }
+  const stamp = iso => day === 'week' ? nice(iso) : clock(iso);
+  const line = (at, text) => el('div', { class: 'recap-line' }, el('span', { class: 'mono', text: stamp(at) }), el('span', { text: text }));
+  view.append(el('div', { class: 'stack' }, d.projects.map(p => {
+    const requests = p.sessions.reduce((n, x) => n + x.requests, 0);
+    return el('section', { class: 'card' },
+      el('div', { class: 'sechead' }, el('h2', { class: 'mono', text: p.name }),
+        el('span', { class: 'quiet small', text: `${plural(p.sessions.length, 'session', 'sessions')}, ${plural(requests, 'request', 'requests')}, ${plural(p.checkpoints.length, 'checkpoint', 'checkpoints')}, ${plural(p.commits.length, 'commit', 'commits')}` })),
+      p.sessions.map(x => el('a', { class: 'latest', href: `#/history/${p.project_id}/${x.id}/read` },
+        el('span', { class: 'top' }, el('span', { text: `${stamp(x.from)} to ${clock(x.to)}` }),
+          el('span', { text: plural(x.requests, 'request', 'requests') + (x.failed_commands ? `, ${plural(x.failed_commands, 'failed command', 'failed commands')}` : '') })),
+        el('span', { class: 'line wrap', text: x.first_request || '(no text was saved in this session)' }),
+        x.summary ? el('span', { class: 'line wrap quiet', text: 'Summary, written by a model: ' + clip(x.summary.replace(/\s+/g, ' '), 320) })
+          : x.last_reply ? el('span', { class: 'line wrap quiet', text: 'Last reply: ' + x.last_reply }) : null,
+        x.files && x.files.length ? el('span', { class: 'line wrap quiet small', text: 'Files: ' + x.files.join(', ') + (x.more_files ? ` and ${x.more_files} more` : '') }) : null)),
+      p.checkpoints.length ? [el('h3', { text: 'Checkpoints' }), p.checkpoints.map(c => line(c.created_at, clip(c.note.replace(/\s+/g, ' '), 240)))] : null,
+      p.commits.length ? [el('h3', { text: 'Commits' }), p.commits.map(c => line(c.at, `${c.id}  ${c.subject}`))] : null);
+  })));
+}
+
 // ---- Pick up work ---------------------------------------------------------------------------
 
 async function resumeView(pid) {
@@ -995,7 +1030,7 @@ async function diagnostics() {
 
 // ---- Routing --------------------------------------------------------------------------------
 
-const views = { overview: ['Overview', overview], resume: ['Pick up work', resumeView], history: ['History', historyView], search: ['Search', searchView],
+const views = { overview: ['Overview', overview], recap: ['Recap', recapView], resume: ['Pick up work', resumeView], history: ['History', historyView], search: ['Search', searchView],
   instructions: ['Instructions', instructionsView], research: ['Research', researchView], projects: ['Projects', projectsView],
   settings: ['Settings', settingsView], diagnostics: ['Health', diagnostics] };
 
