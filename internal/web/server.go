@@ -32,7 +32,9 @@ import (
 var uiFS embed.FS
 
 // Runner executes one sessionkeep command and returns what it printed and its exit status.
-type Runner func(args []string) (stdout, stderr []byte, code int)
+// stdin is what the command reads; it is how a secret typed into the page reaches a command
+// without being put on a command line.
+type Runner func(args []string, stdin []byte) (stdout, stderr []byte, code int)
 
 // Exit statuses of the command line, mirrored here to avoid importing it.
 const (
@@ -267,8 +269,11 @@ func decode(w http.ResponseWriter, r *http.Request, into any) bool {
 
 // command runs a sessionkeep command with --json and relays the result. A command that needs
 // confirmation answers 409 with its preview, so the page can show exactly what would happen.
-func (s *Server) command(w http.ResponseWriter, args ...string) {
-	out, _, code := s.run(append([]string{"--json"}, args...))
+func (s *Server) command(w http.ResponseWriter, args ...string) { s.commandIn(w, nil, args...) }
+
+// commandIn is command with something for the command to read on its standard input.
+func (s *Server) commandIn(w http.ResponseWriter, stdin []byte, args ...string) {
+	out, _, code := s.run(append([]string{"--json"}, args...), stdin)
 	var data, errBody json.RawMessage
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		var env struct {

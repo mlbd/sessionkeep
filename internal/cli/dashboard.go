@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 
 	"sessionkeep/internal/buildinfo"
 	"sessionkeep/internal/web"
@@ -13,9 +12,9 @@ import (
 
 // runner lets the dashboard execute sessionkeep commands in-process with this invocation's environment.
 func runner(getenv func(string) string) web.Runner {
-	return func(args []string) ([]byte, []byte, int) {
+	return func(args []string, stdin []byte) ([]byte, []byte, int) {
 		var out, errOut bytes.Buffer
-		code := Run(args, strings.NewReader(""), &out, &errOut, getenv)
+		code := Run(args, bytes.NewReader(stdin), &out, &errOut, getenv)
 		return out.Bytes(), errOut.Bytes(), code
 	}
 }

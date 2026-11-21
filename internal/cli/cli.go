@@ -123,8 +123,8 @@ Usage:
                                    checkpoints and, if you ask, what was said in its sessions,
                                    in one readable file (not encrypted). Both show what would
                                    happen first; receive adds it to a project you registered
-  sessionkeep team connect --name SHARED-NAME --endpoint URL --bucket BUCKET [--from YOUR-NAME]
-  sessionkeep team push [--no-sessions] [--yes] | pull [--yes] | status | disconnect [--yes]
+  sessionkeep team storage --endpoint URL --bucket BUCKET [--from YOUR-NAME]
+  sessionkeep team connect --name SHARED-NAME | sync [--yes] | list | status | disconnect [--yes]
                                    Keep one project's memory in a storage bucket you chose
                                    (Cloudflare R2 or another S3-compatible service) and exchange
                                    it with colleagues who connect the same shared name. What is
@@ -257,7 +257,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due" || name == "with-sessions" || name == "no-sessions") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due" || name == "with-sessions" || name == "no-sessions" || name == "secrets-stdin") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}

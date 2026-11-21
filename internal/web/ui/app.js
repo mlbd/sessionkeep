@@ -268,52 +268,137 @@ async function sync(p, justAdded) {
   ]);
 }
 
-// Team sync: what this computer has not sent to the project's team bucket, and what colleagues
-// sent that it has not received. Sending and receiving each need their own press.
-async function teamSync(p) {
-  const heading = `Team sync for ${p.name}`;
-  say(`Looking at the team bucket for ${p.name}. This can take a minute.`);
-  const r = await api('GET', `/api/team?project=${enc(p.id)}`);
-  say('');
-  if (!r.ok) {
-    return openDialog(heading, [
-      el('p', { text: problem(r) }),
-      el('p', { class: 'quiet small' }, 'Connecting is done once in a terminal, because it needs the storage keys and the team passphrase, which never pass through this page. Run ', el('code', { text: 'sessionkeep team' }), ' to see how.'),
-    ], [btn('Close', 'btn', () => dialog.close())]);
-  }
-  const d = r.data, send = d.to_send, toSend = send.instructions + send.checkpoints + send.pieces_of_text;
-  const buttons = [btn('Close', 'btn', () => dialog.close())];
-  if (toSend) buttons.push(btn('Send my new work', 'btn primary', async () => {
-    const done = await api('POST', '/api/team/push', { project: p.id, confirm: true });
-    dialog.close();
-    say(done.ok ? 'Sent, encrypted. Colleagues get it with their next pull.' : problem(done), done.ok ? 'ok' : 'bad');
-  }));
-  if (d.bundles_to_receive) buttons.push(btn('See what colleagues sent', 'btn primary', () => teamReceive(p)));
-  openDialog(heading, [
-    el('p', { text: `Connected to the bucket ${d.bucket} under the shared name "${d.name}".` }),
-    el('p', { text: toSend ? `To send: ${plural(send.instructions, 'instruction', 'instructions')}, ${plural(send.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(send.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(send.sessions, 'session', 'sessions')}.` : 'To send: nothing new.' }),
-    el('p', { text: d.bundles_to_receive ? `To receive: ${plural(d.bundles_to_receive, 'bundle', 'bundles')} from colleagues.` : 'To receive: nothing new.' }),
-    el('p', { class: 'quiet small', text: 'What you send is encrypted on this computer with the team passphrase before it leaves. Your folder paths are shortened and secrets are removed; other names or paths you typed in a conversation are not.' }),
-  ], buttons);
+// ---- Sharing a project through the cloud ----------------------------------------------------
+
+// Which storage is saved on this computer and which projects are shared through it. A project
+// is never sent anywhere unless sharing was turned on for it here.
+let team = { storage: { set: false }, projects: {} };
+async function loadTeam() {
+  const r = await api('GET', '/api/team/overview');
+  if (r.ok && r.data && r.data.storage) team = r.data;
+  return r;
 }
 
-// Shows what colleagues sent, with every instruction in full, before anything is taken in.
-async function teamReceive(p) {
-  const r = await api('POST', '/api/team/pull', { project: p.id, confirm: false });
-  if (r.status !== 409 || !r.data) { dialog.close(); return say(r.ok ? 'Nothing new from the team.' : problem(r), r.ok ? 'ok' : 'bad'); }
-  const d = r.data, c = d.counts, told = d.instructions || [];
-  openDialog(`Take in what ${(d.from || []).join(', ') || 'colleagues'} sent?`, [
-    el('p', { text: `${plural(c.instructions, 'instruction', 'instructions')}, ${plural(c.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(c.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(c.sessions, 'session', 'sessions')}.` + (c.sessions && !d.sessions_taken ? ' The sessions would be left out: this project is paused or does not save conversation text.' : '') }),
-    told.length ? el('p', { text: 'These instructions would be given to Claude in every session of this project, as if you had recorded them. Read them:' }) : '',
+// A line inside a dialog for what went wrong, so that what was typed is not lost.
+const alertLine = () => el('p', { class: 'oops', role: 'alert' });
+const countLine = c => `${plural(c.instructions, 'instruction', 'instructions')}, ${plural(c.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(c.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(c.sessions, 'session', 'sessions')}`;
+
+// The storage bucket and its keys, typed once. They are kept protected on this computer and no
+// page shows them again.
+function cloudStorage(then) {
+  const s = team.storage;
+  const endpoint = el('input', { type: 'text', id: 'cs-endpoint', class: 'code', autocomplete: 'off', value: s.endpoint || '' });
+  const bucket = el('input', { type: 'text', id: 'cs-bucket', class: 'code', autocomplete: 'off', value: s.bucket || '' });
+  const access = el('input', { type: 'password', id: 'cs-access', class: 'code', autocomplete: 'off' });
+  const secret = el('input', { type: 'password', id: 'cs-secret', class: 'code', autocomplete: 'off' });
+  const from = el('input', { type: 'text', id: 'cs-from', autocomplete: 'off', value: s.as || '' });
+  const wrong = alertLine();
+  openDialog(s.set ? 'Change the cloud storage' : 'Set up cloud storage', [
+    el('p', { class: 'quiet small', text: 'A storage bucket in your own account (Cloudflare R2, or another S3-compatible service). Only projects you turn sharing on for are ever sent there, and they are encrypted first.' }),
+    field('Storage address', endpoint, 'Cloudflare shows it when you create the R2 API token. It ends in r2.cloudflarestorage.com.'),
+    field('Bucket name', bucket),
+    field('Access Key ID', access),
+    field('Secret Access Key', secret, 'Both keys are kept protected on this computer and are never shown again.'),
+    field('Your name', from, 'How colleagues see who sent something.'),
+    wrong,
+  ], [
+    btn('Cancel', 'btn', () => dialog.close()),
+    btn('Save storage', 'btn primary', async () => {
+      const r = await api('POST', '/api/team/storage', { endpoint: endpoint.value.trim(), bucket: bucket.value.trim(), from: from.value.trim(), access_key: access.value, secret_key: secret.value });
+      if (!r.ok) { wrong.textContent = problem(r); return; }
+      await loadTeam();
+      dialog.close();
+      say('The bucket answered and the storage is saved. Nothing was sent.', 'ok');
+      return then ? then() : reload();
+    }),
+  ]);
+}
+
+function forgetStorage() {
+  openDialog('Forget the cloud storage?', [
+    el('p', { text: 'This computer forgets the bucket and its keys. Projects already shared keep working until you stop sharing them. Nothing in the bucket is touched.' }),
+  ], [
+    btn('Keep it', 'btn', () => dialog.close()),
+    btn('Forget storage', 'btn danger', async () => {
+      const r = await api('POST', '/api/team/storage', { forget: true });
+      dialog.close();
+      if (!r.ok) return say(problem(r), 'bad');
+      await loadTeam();
+      await reload();
+      say('The cloud storage is forgotten.', 'ok');
+    }),
+  ]);
+}
+
+// Turning sharing on for one project: a shared name and a passphrase, nothing else.
+function shareProject(p) {
+  if (!team.storage.set) return cloudStorage(() => shareProject(p));
+  const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  const shared = el('input', { type: 'text', id: 'sh-name', class: 'code', autocomplete: 'off', value: slug });
+  const pass = el('input', { type: 'password', id: 'sh-pass', autocomplete: 'new-password' });
+  const wrong = alertLine();
+  openDialog(`Share ${p.name} through the cloud?`, [
+    el('p', { text: `Its instructions, checkpoints and conversations can then be sent, encrypted, to the bucket ${team.storage.bucket}, and colleagues who share the same project can receive them. Nothing is sent until you press Sync now.` }),
+    field('Shared project name', shared, 'Colleagues must type exactly the same name. Lower-case letters, digits and dashes.'),
+    field('Passphrase for this project', pass, `At least ${team.min_passphrase || 12} characters. Make one up if you are the first to share this project; otherwise type the one your colleague gave you. Keep it somewhere safe: it is never shown again, and anyone who has it and can reach the bucket can read what is sent.`),
+    wrong,
+  ], [
+    btn('Cancel', 'btn', () => dialog.close()),
+    btn('Turn sharing on', 'btn primary', async () => {
+      const r = await api('POST', '/api/team/connect', { project: p.id, name: shared.value.trim(), passphrase: pass.value });
+      if (!r.ok) { wrong.textContent = problem(r); return; }
+      await loadTeam();
+      dialog.close();
+      await reload();
+      say(`${p.name} is now shared as "${r.data.name}". ` + (r.data.bundles_there ? `${plural(r.data.bundles_there, 'bundle is', 'bundles are')} already in the bucket for it.` : 'The bucket holds nothing for it yet.') + ' Press Sync now to receive and send.', 'ok');
+    }),
+  ]);
+}
+
+// One press for both directions: what colleagues sent is received, then what is new here is
+// sent. What would happen is shown first, with every received instruction in full.
+async function teamSync(p) {
+  say(`Looking at the bucket for ${p.name}. This can take a minute.`);
+  const r = await api('POST', '/api/team/sync', { project: p.id, confirm: false });
+  if (r.ok) return say(`${p.name} is in step: nothing to receive and nothing new to send.`, 'ok');
+  if (r.status !== 409 || !r.data || !r.data.receive) return say(problem(r), 'bad');
+  say('Nothing is received or sent yet.');
+  const get = r.data.receive, send = r.data.send, told = get.instructions || [];
+  const toSend = send.counts.instructions + send.counts.checkpoints + send.counts.pieces_of_text;
+  openDialog(`Sync ${p.name}?`, [
+    el('p', {}, el('strong', { text: 'To receive: ' }), get.bundles ? `${countLine(get.counts)}, sent by ${(get.from || []).join(', ') || 'colleagues'}.` + (get.counts.sessions && !get.sessions_taken ? ' The sessions would be left out: this project is paused or does not save conversation text.' : '') : 'nothing new.'),
+    told.length ? el('p', { text: 'These received instructions would be given to Claude in every session of this project, as if you had recorded them. Read them:' }) : null,
     told.map(i => el('blockquote', { class: 'exact said', text: i.text })),
-  ].flat(), [
-    btn('Not now', 'btn', () => dialog.close()),
-    btn('Take it in', 'btn primary', async () => {
-      const done = await api('POST', '/api/team/pull', { project: p.id, confirm: true });
+    el('p', {}, el('strong', { text: 'To send: ' }), toSend ? `${countLine(send.counts)}.` : 'nothing new.'),
+    el('p', { class: 'quiet small', text: 'What you send is encrypted on this computer with the passphrase of this project before it leaves. Your folder paths are shortened and secrets are removed; other names or paths you typed in a conversation are not. It cannot be taken back from colleagues who received it.' }),
+  ].flat().filter(Boolean), [
+    btn('Not now', 'btn', () => { dialog.close(); say(''); }),
+    btn('Receive and send', 'btn primary', async () => {
+      const done = await api('POST', '/api/team/sync', { project: p.id, confirm: true });
       dialog.close();
       if (!done.ok) return say(problem(done), 'bad');
       await reload();
-      say(`Received ${plural(done.data.stored.pieces_of_text, 'piece of text', 'pieces of text')}, ${plural(done.data.stored.instructions, 'instruction', 'instructions')} and ${plural(done.data.stored.checkpoints, 'checkpoint', 'checkpoints')}.`, 'ok');
+      const got = done.data.receive.stored;
+      say((got ? `Received ${plural(got.pieces_of_text, 'piece of text', 'pieces of text')}, ${plural(got.instructions, 'instruction', 'instructions')} and ${plural(got.checkpoints, 'checkpoint', 'checkpoints')}. ` : '') + (done.data.send.sent ? 'Your new work is sent, encrypted.' : 'Nothing new to send.'), 'ok');
+    }),
+  ]);
+}
+
+async function stopSharing(p) {
+  const r = await api('POST', '/api/team/disconnect', { project: p.id, confirm: false });
+  if (r.status !== 409) return say(problem(r), 'bad');
+  openDialog(`Stop sharing ${p.name}?`, [
+    el('p', { text: 'This computer forgets the passphrase and what it sent and received for this project. Nothing more is sent or received. Everything saved here stays.' }),
+    el('p', { class: 'quiet small', text: 'What is already in the bucket stays there until you delete it in the storage service, and colleagues keep what they received. To share again later you need the shared name and the passphrase.' }),
+  ], [
+    btn('Keep sharing', 'btn', () => dialog.close()),
+    btn('Stop sharing', 'btn danger', async () => {
+      const done = await api('POST', '/api/team/disconnect', { project: p.id, confirm: true });
+      dialog.close();
+      if (!done.ok) return say(problem(done), 'bad');
+      await loadTeam();
+      await reload();
+      say(`${p.name} is no longer shared.`, 'ok');
     }),
   ]);
 }
@@ -922,7 +1007,8 @@ async function researchView(pid, sel) {
 async function projectsView(sel) {
   const pr = await loadProjects();
   if (!pr.ok) return say(problem(pr), 'bad');
-  lede.textContent = 'SessionKeep saves only inside these folders, at the level you choose for each.';
+  await loadTeam();
+  lede.textContent = 'SessionKeep saves only inside these folders, at the level you choose for each. A project leaves this computer only if you share it.';
   const list = el('div', { class: 'card flush rows' });
   const pane = el('div', { class: 'col-side', 'aria-live': 'polite' });
   const again = () => show('projects', true);
@@ -931,6 +1017,7 @@ async function projectsView(sel) {
     const p = projects.find(x => x.id === id);
     if (!p) return pane.replaceChildren();
     const [, , words] = savingState(p);
+    const shared = team.projects[p.id];
     const level = choice('lvl-' + p.id, 'What is saved', LEVELS, p.capture_level);
     const recall = choice('rec-' + p.id, 'How Claude gets earlier sessions', [
       ['asked', 'When asked', 'Claude gets your instructions and the latest checkpoint, and looks into earlier sessions when you refer to them.'],
@@ -942,8 +1029,10 @@ async function projectsView(sel) {
         btn(p.paused ? 'Resume saving' : 'Pause saving', p.paused ? 'btn primary' : 'btn', () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Saving again.' : 'Paused.'))),
       recall,
       el('div', { class: 'row' }, btn('Change how Claude gets them', 'btn', () => act(`/api/projects/${p.id}/recall`, { mode: recall.value() }, 'Changed. It applies from the next request.'))),
-      el('div', { class: 'row' }, btn('Team sync', 'btn', () => teamSync(p), `Send and receive the work on ${p.name} through the team bucket`),
-        el('span', { class: 'quiet small', text: 'Exchanges this project with colleagues through a storage bucket you connected. It shows what would go first.' })),
+      shared ? el('div', { class: 'row' }, btn('Sync now', 'btn primary', () => teamSync(p), `Receive and send the work on ${p.name}`), btn('Stop sharing', 'btn', () => stopSharing(p), `Stop sharing ${p.name}`),
+        el('span', { class: 'quiet small', text: `Shared through the cloud as "${shared.name}" in the bucket ${shared.bucket}. Sync shows what would be received and sent first.` }))
+        : el('div', { class: 'row' }, btn('Share through the cloud', 'btn', () => shareProject(p), `Share ${p.name} through the cloud`),
+          el('span', { class: 'quiet small', text: 'Not shared: this project stays on this computer. Turn this on only for a project you work on with others.' })),
       el('div', { class: 'row' }, btn('Sync with Claude Code', 'btn', () => sync(p), `Bring in sessions of ${p.name} that are not saved yet`),
         el('span', { class: 'quiet small', text: 'Brings in sessions that are not saved yet. It shows what it found first.' })),
       el('p', { class: 'quiet small', text: 'Both of these show what would go and ask before deleting.' }),
@@ -993,7 +1082,7 @@ async function projectsView(sel) {
   list.replaceChildren(...projects.map(p => { const [kind, word] = savingState(p);
     return el('a', { class: 'pick project', href: '#/projects/' + p.id, 'data-id': p.id },
       el('span', { class: 'who' }, el('strong', { text: p.name }), el('span', { class: 'path', text: p.roots.join(', ') + (p.added_by === 'auto' ? ' (added automatically)' : '') })),
-      dotword(kind, word), el('span', { class: 'quiet small', text: levelName(p.capture_level) })); }));
+      dotword(kind, word), el('span', { class: 'quiet small', text: levelName(p.capture_level) + (team.projects[p.id] ? ', shared' : '') })); }));
   view.append(el('div', { class: 'stack' },
     projects.length ? el('div', { class: 'cols' }, el('div', { class: 'col-detail' }, list), pane) : el('p', { class: 'quiet', text: 'No projects yet, so nothing is being saved.' }),
     el('div', { class: 'pair wide' }, addCard, importCard)));
@@ -1035,6 +1124,15 @@ async function settingsView() {
     }) : [el('p', { class: 'working', text: 'No Claude Code account was found on this computer.' })]));
   };
   loadAccounts();
+
+  await loadTeam();
+  const cs = team.storage;
+  stack.append(card('Cloud storage for shared projects',
+    el('p', { class: 'quiet small', text: 'Projects stay on this computer unless you turn sharing on for them, one by one, on the Projects page. Shared projects are sent, encrypted, to this bucket when you press Sync now.' }),
+    cs.set ? el('p', { text: `Bucket ${cs.bucket} at ${cs.endpoint}.` + (cs.as ? ` Colleagues see you as "${cs.as}".` : '') + ` ${plural(Object.keys(team.projects).length, 'project is', 'projects are')} shared.` })
+      : el('p', { class: 'quiet', text: 'No storage is set up, so nothing can be shared.' }),
+    el('div', { class: 'row' }, btn(cs.set ? 'Change storage' : 'Set up cloud storage', 'btn', () => cloudStorage()),
+      cs.saved ? btn('Forget storage', 'btn', () => forgetStorage()) : null)));
 
   if (sm.ok) {
     const d = sm.data;

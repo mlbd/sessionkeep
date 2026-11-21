@@ -88,6 +88,8 @@ h1 { font-size: 26px; letter-spacing: -0.02em; font-weight: 650; }
 #notice:empty { margin: 0; }
 #notice.ok { color: var(--ok); font-weight: 600; }
 #notice.bad { color: var(--bad); font-weight: 600; }
+.oops { color: var(--bad); font-weight: 600; margin: 0; }
+.oops:empty { display: none; }
 #view { max-width: 1180px; margin: 0 auto; padding: 20px 40px 64px; }
 #view.narrow { max-width: 860px; }
 #view.wide { max-width: none; padding: 20px 0 0; }

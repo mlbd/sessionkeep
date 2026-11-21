@@ -132,7 +132,7 @@ func uninstallCmd(inv invocation) error {
 		}
 		if inv.flags["yes"] == "" {
 			counts := "no database"
-			if raw, _, code := runner(inv.getenv)([]string{"status", "--json"}); code == ExitOK {
+			if raw, _, code := runner(inv.getenv)([]string{"status", "--json"}, nil); code == ExitOK {
 				var st struct {
 					Data struct{ Stored json.RawMessage }
 				}

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -337,10 +338,44 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.command(w, args...)
 	})
 
-	// Team sync through a bucket the owner connected in a terminal (the keys never pass through
-	// the dashboard). Without "confirm": true, push and pull answer 409 with what would happen.
+	// Sharing a project through a storage bucket. The keys and a project's passphrase are typed
+	// into the page once (ADR-0010); they are handed to the command on its standard input, never
+	// on a command line, and no endpoint ever returns them. Without "confirm": true, sync, push,
+	// pull and disconnect answer 409 with what would happen.
 	mux.HandleFunc("GET /api/team", func(w http.ResponseWriter, r *http.Request) {
 		s.command(w, "team", "status", flag("project", r.URL.Query().Get("project")))
+	})
+	mux.HandleFunc("GET /api/team/overview", func(w http.ResponseWriter, r *http.Request) { s.command(w, "team", "list") })
+	mux.HandleFunc("POST /api/team/storage", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Endpoint  string `json:"endpoint"`
+			Bucket    string `json:"bucket"`
+			From      string `json:"from"`
+			AccessKey string `json:"access_key"`
+			SecretKey string `json:"secret_key"`
+			Forget    bool   `json:"forget"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Forget {
+			s.command(w, "team", "storage-forget", "--yes")
+			return
+		}
+		secrets, _ := json.Marshal(map[string]string{"access_key": in.AccessKey, "secret_key": in.SecretKey})
+		s.commandIn(w, secrets, "team", "storage", "--secrets-stdin", flag("endpoint", in.Endpoint), flag("bucket", in.Bucket), flag("from", in.From))
+	})
+	mux.HandleFunc("POST /api/team/connect", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Project    string `json:"project"`
+			Name       string `json:"name"`
+			Passphrase string `json:"passphrase"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		secrets, _ := json.Marshal(map[string]string{"passphrase": in.Passphrase})
+		s.commandIn(w, secrets, "team", "connect", "--secrets-stdin", flag("project", in.Project), flag("name", in.Name))
 	})
 	mux.HandleFunc("POST /api/team/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -351,7 +386,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 			return
 		}
 		a := r.PathValue("action")
-		if a != "push" && a != "pull" {
+		if a != "push" && a != "pull" && a != "sync" && a != "disconnect" {
 			fail(w, http.StatusNotFound, "not_found", "no such action")
 			return
 		}

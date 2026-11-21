@@ -52,8 +52,20 @@ type Secrets struct {
 	Passphrase string `json:"passphrase"`
 }
 
+// Storage is the bucket this computer uses for every project it shares, saved once so that
+// sharing another project needs only a shared name and a passphrase. Its keys are kept sealed.
+type Storage struct {
+	Endpoint string `json:"endpoint"`
+	Bucket   string `json:"bucket"`
+	Region   string `json:"region"`
+	As       string `json:"as,omitempty"`
+	Sealed   string `json:"sealed"`
+	SavedAt  string `json:"saved_at,omitempty"`
+}
+
 type configFile struct {
 	Version     int                   `json:"version"`
+	Storage     *Storage              `json:"storage,omitempty"`
 	Connections map[string]Connection `json:"connections"`
 }
 
@@ -113,39 +125,133 @@ func Get(p config.Paths, projectID string) (Connection, Secrets, bool, error) {
 	if !ok {
 		return Connection{}, Secrets{}, false, nil
 	}
-	sealed, err := base64.StdEncoding.DecodeString(conn.Sealed)
+	sec, err := unseal(conn.Sealed)
 	if err != nil {
-		return conn, Secrets{}, true, errors.New("the stored keys are damaged; connect the project again")
-	}
-	plain, err := keep.Open(sealed)
-	var sec Secrets
-	if err != nil || json.Unmarshal(plain, &sec) != nil {
-		return conn, Secrets{}, true, errors.New("the stored keys cannot be opened by this user on this computer; connect the project again")
+		return conn, Secrets{}, true, err
 	}
 	return conn, sec, true, nil
 }
 
-// Put saves a project's connection with its secrets sealed.
-func Put(p config.Paths, conn Connection, sec Secrets) error {
+func unseal(text string) (Secrets, error) {
+	sealed, err := base64.StdEncoding.DecodeString(text)
+	if err != nil {
+		return Secrets{}, errors.New("the stored keys are damaged; connect the project again")
+	}
+	plain, err := keep.Open(sealed)
+	var sec Secrets
+	if err != nil || json.Unmarshal(plain, &sec) != nil {
+		return Secrets{}, errors.New("the stored keys cannot be opened by this user on this computer; connect the project again")
+	}
+	return sec, nil
+}
+
+func seal(sec Secrets) (string, error) {
 	plain, err := json.Marshal(sec)
 	if err != nil {
-		return err
+		return "", err
 	}
 	sealed, err := keep.Seal(plain)
 	if err != nil {
-		return fmt.Errorf("the keys could not be protected for storing: %w", err)
+		return "", fmt.Errorf("the keys could not be protected for storing: %w", err)
 	}
-	conn.Sealed = base64.StdEncoding.EncodeToString(sealed)
-	c, err := load(p)
-	if err != nil {
-		return err
-	}
-	c.Connections[conn.ProjectID] = conn
+	return base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func save(p config.Paths, c configFile) error {
 	raw, err := json.MarshalIndent(c, "", " ")
 	if err != nil {
 		return err
 	}
 	return fsx.WriteAtomic(configPath(p), append(raw, '\n'))
+}
+
+// Connections returns every project's connection, by project id. No secret is opened.
+func Connections(p config.Paths) (map[string]Connection, error) {
+	c, err := load(p)
+	return c.Connections, err
+}
+
+// GetStorage returns the saved storage and its keys. When none was saved but a project is
+// connected, the storage of the most recently connected project stands in, so that someone who
+// connected one project in a terminal is not asked for the same keys again. saved says which.
+func GetStorage(p config.Paths) (s Storage, keys Secrets, ok, saved bool, err error) {
+	c, err := load(p)
+	if err != nil {
+		return s, keys, false, false, err
+	}
+	if c.Storage != nil {
+		keys, err = unseal(c.Storage.Sealed)
+		return *c.Storage, keys, true, true, err
+	}
+	var latest *Connection
+	for id := range c.Connections {
+		conn := c.Connections[id]
+		if latest == nil || conn.ConnectedAt > latest.ConnectedAt {
+			latest = &conn
+		}
+	}
+	if latest == nil {
+		return s, keys, false, false, nil
+	}
+	keys, err = unseal(latest.Sealed)
+	keys.Passphrase = ""
+	return Storage{Endpoint: latest.Endpoint, Bucket: latest.Bucket, Region: latest.Region, As: latest.As}, keys, true, false, err
+}
+
+// PutStorage saves the storage with its keys sealed. Projects already connected to the same
+// endpoint and bucket get the new keys too, so replacing a key is done in one place.
+func PutStorage(p config.Paths, s Storage, keys Secrets) error {
+	keys.Passphrase = ""
+	sealed, err := seal(keys)
+	if err != nil {
+		return err
+	}
+	s.Sealed = sealed
+	c, err := load(p)
+	if err != nil {
+		return err
+	}
+	c.Storage = &s
+	for id, conn := range c.Connections {
+		if conn.Endpoint != s.Endpoint || conn.Bucket != s.Bucket {
+			continue
+		}
+		sec, err := unseal(conn.Sealed)
+		if err != nil {
+			continue
+		}
+		sec.AccessKey, sec.SecretKey = keys.AccessKey, keys.SecretKey
+		if conn.Sealed, err = seal(sec); err != nil {
+			return err
+		}
+		c.Connections[id] = conn
+	}
+	return save(p, c)
+}
+
+// RemoveStorage forgets the saved storage. Connected projects keep their own copy of the keys.
+func RemoveStorage(p config.Paths) error {
+	c, err := load(p)
+	if err != nil {
+		return err
+	}
+	c.Storage = nil
+	return save(p, c)
+}
+
+// Put saves a project's connection with its secrets sealed.
+func Put(p config.Paths, conn Connection, sec Secrets) error {
+	sealed, err := seal(sec)
+	if err != nil {
+		return err
+	}
+	conn.Sealed = sealed
+	c, err := load(p)
+	if err != nil {
+		return err
+	}
+	c.Connections[conn.ProjectID] = conn
+	return save(p, c)
 }
 
 // Remove forgets a project's connection and what was sent and received. The bucket is untouched.
@@ -155,14 +261,10 @@ func Remove(p config.Paths, projectID string) error {
 		return err
 	}
 	delete(c.Connections, projectID)
-	raw, err := json.MarshalIndent(c, "", " ")
-	if err != nil {
-		return err
-	}
 	for _, f := range []string{statePath(p, projectID), statePath(p, projectID) + fsx.AltSuffix} {
 		os.Remove(f)
 	}
-	return fsx.WriteAtomic(configPath(p), append(raw, '\n'))
+	return save(p, c)
 }
 
 // LoadState reads what was sent and received; a missing file is an empty state.
