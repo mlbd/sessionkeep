@@ -337,6 +337,31 @@ func (s *Server) routes(mux *http.ServeMux) {
 		s.command(w, args...)
 	})
 
+	// Team sync through a bucket the owner connected in a terminal (the keys never pass through
+	// the dashboard). Without "confirm": true, push and pull answer 409 with what would happen.
+	mux.HandleFunc("GET /api/team", func(w http.ResponseWriter, r *http.Request) {
+		s.command(w, "team", "status", flag("project", r.URL.Query().Get("project")))
+	})
+	mux.HandleFunc("POST /api/team/{action}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Project string `json:"project"`
+			Confirm bool   `json:"confirm"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		a := r.PathValue("action")
+		if a != "push" && a != "pull" {
+			fail(w, http.StatusNotFound, "not_found", "no such action")
+			return
+		}
+		args := []string{"team", a, flag("project", in.Project)}
+		if in.Confirm {
+			args = append(args, "--yes")
+		}
+		s.command(w, args...)
+	})
+
 	// Deletion. Without "confirm": true the answer is 409 with exactly what would be removed.
 	mux.HandleFunc("POST /api/forget", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

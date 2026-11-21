@@ -123,6 +123,14 @@ Usage:
                                    checkpoints and, if you ask, what was said in its sessions,
                                    in one readable file (not encrypted). Both show what would
                                    happen first; receive adds it to a project you registered
+  sessionkeep team connect --name SHARED-NAME --endpoint URL --bucket BUCKET [--from YOUR-NAME]
+  sessionkeep team push [--no-sessions] [--yes] | pull [--yes] | status | disconnect [--yes]
+                                   Keep one project's memory in a storage bucket you chose
+                                   (Cloudflare R2 or another S3-compatible service) and exchange
+                                   it with colleagues who connect the same shared name. What is
+                                   sent is encrypted here first with the team passphrase; push
+                                   and pull show what would happen and need --yes. Run
+                                   "sessionkeep team" for how the keys are given
   sessionkeep forget record ID | captured --project P | project P   [--yes]
                                    Permanently delete stored data; without --yes it only shows
                                    what would be deleted
@@ -200,7 +208,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes", "endpoint", "bucket", "region")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)
@@ -249,7 +257,7 @@ func parse(args []string, valueFlags ...string) (inv invocation, err error) {
 			continue
 		}
 		name, val, hasVal := strings.Cut(a[2:], "=")
-		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due" || name == "with-sessions") && !hasVal { // switches that take no value
+		if (name == "yes" || name == "all" || name == "all-projects" || name == "exact" || name == "with-mcp" || name == "enable-plugin" || name == "dry-run" || name == "purge-data" || name == "manual" || name == "detached" || name == "due" || name == "with-sessions" || name == "no-sessions") && !hasVal { // switches that take no value
 			inv.flags[name] = "true"
 			continue
 		}
@@ -402,6 +410,8 @@ func dispatch(inv invocation) error {
 		return importCmd(inv, rest)
 	case "handoff":
 		return handoffCmd(inv, rest)
+	case "team":
+		return teamCmd(inv, rest)
 	case "forget":
 		return forgetCmd(inv, rest)
 	case "dashboard":

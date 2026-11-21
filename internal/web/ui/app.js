@@ -268,6 +268,56 @@ async function sync(p, justAdded) {
   ]);
 }
 
+// Team sync: what this computer has not sent to the project's team bucket, and what colleagues
+// sent that it has not received. Sending and receiving each need their own press.
+async function teamSync(p) {
+  const heading = `Team sync for ${p.name}`;
+  say(`Looking at the team bucket for ${p.name}. This can take a minute.`);
+  const r = await api('GET', `/api/team?project=${enc(p.id)}`);
+  say('');
+  if (!r.ok) {
+    return openDialog(heading, [
+      el('p', { text: problem(r) }),
+      el('p', { class: 'quiet small' }, 'Connecting is done once in a terminal, because it needs the storage keys and the team passphrase, which never pass through this page. Run ', el('code', { text: 'sessionkeep team' }), ' to see how.'),
+    ], [btn('Close', 'btn', () => dialog.close())]);
+  }
+  const d = r.data, send = d.to_send, toSend = send.instructions + send.checkpoints + send.pieces_of_text;
+  const buttons = [btn('Close', 'btn', () => dialog.close())];
+  if (toSend) buttons.push(btn('Send my new work', 'btn primary', async () => {
+    const done = await api('POST', '/api/team/push', { project: p.id, confirm: true });
+    dialog.close();
+    say(done.ok ? 'Sent, encrypted. Colleagues get it with their next pull.' : problem(done), done.ok ? 'ok' : 'bad');
+  }));
+  if (d.bundles_to_receive) buttons.push(btn('See what colleagues sent', 'btn primary', () => teamReceive(p)));
+  openDialog(heading, [
+    el('p', { text: `Connected to the bucket ${d.bucket} under the shared name "${d.name}".` }),
+    el('p', { text: toSend ? `To send: ${plural(send.instructions, 'instruction', 'instructions')}, ${plural(send.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(send.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(send.sessions, 'session', 'sessions')}.` : 'To send: nothing new.' }),
+    el('p', { text: d.bundles_to_receive ? `To receive: ${plural(d.bundles_to_receive, 'bundle', 'bundles')} from colleagues.` : 'To receive: nothing new.' }),
+    el('p', { class: 'quiet small', text: 'What you send is encrypted on this computer with the team passphrase before it leaves. Your folder paths are shortened and secrets are removed; other names or paths you typed in a conversation are not.' }),
+  ], buttons);
+}
+
+// Shows what colleagues sent, with every instruction in full, before anything is taken in.
+async function teamReceive(p) {
+  const r = await api('POST', '/api/team/pull', { project: p.id, confirm: false });
+  if (r.status !== 409 || !r.data) { dialog.close(); return say(r.ok ? 'Nothing new from the team.' : problem(r), r.ok ? 'ok' : 'bad'); }
+  const d = r.data, c = d.counts, told = d.instructions || [];
+  openDialog(`Take in what ${(d.from || []).join(', ') || 'colleagues'} sent?`, [
+    el('p', { text: `${plural(c.instructions, 'instruction', 'instructions')}, ${plural(c.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(c.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(c.sessions, 'session', 'sessions')}.` + (c.sessions && !d.sessions_taken ? ' The sessions would be left out: this project is paused or does not save conversation text.' : '') }),
+    told.length ? el('p', { text: 'These instructions would be given to Claude in every session of this project, as if you had recorded them. Read them:' }) : '',
+    told.map(i => el('blockquote', { class: 'exact said', text: i.text })),
+  ].flat(), [
+    btn('Not now', 'btn', () => dialog.close()),
+    btn('Take it in', 'btn primary', async () => {
+      const done = await api('POST', '/api/team/pull', { project: p.id, confirm: true });
+      dialog.close();
+      if (!done.ok) return say(problem(done), 'bad');
+      await reload();
+      say(`Received ${plural(done.data.stored.pieces_of_text, 'piece of text', 'pieces of text')}, ${plural(done.data.stored.instructions, 'instruction', 'instructions')} and ${plural(done.data.stored.checkpoints, 'checkpoint', 'checkpoints')}.`, 'ok');
+    }),
+  ]);
+}
+
 // A checkpoint note written as "Done: / Next: / Blocking:" lines is shown in those three parts.
 function noteParts(note) {
   const parts = {};
@@ -892,6 +942,8 @@ async function projectsView(sel) {
         btn(p.paused ? 'Resume saving' : 'Pause saving', p.paused ? 'btn primary' : 'btn', () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Saving again.' : 'Paused.'))),
       recall,
       el('div', { class: 'row' }, btn('Change how Claude gets them', 'btn', () => act(`/api/projects/${p.id}/recall`, { mode: recall.value() }, 'Changed. It applies from the next request.'))),
+      el('div', { class: 'row' }, btn('Team sync', 'btn', () => teamSync(p), `Send and receive the work on ${p.name} through the team bucket`),
+        el('span', { class: 'quiet small', text: 'Exchanges this project with colleagues through a storage bucket you connected. It shows what would go first.' })),
       el('div', { class: 'row' }, btn('Sync with Claude Code', 'btn', () => sync(p), `Bring in sessions of ${p.name} that are not saved yet`),
         el('span', { class: 'quiet small', text: 'Brings in sessions that are not saved yet. It shows what it found first.' })),
       el('p', { class: 'quiet small', text: 'Both of these show what would go and ask before deleting.' }),

@@ -21,6 +21,7 @@ import (
 	"sessionkeep/internal/instruct"
 	"sessionkeep/internal/lease"
 	"sessionkeep/internal/store"
+	"sessionkeep/internal/team"
 )
 
 // exportCmd writes everything SessionKeep holds into one file. Waiting events are stored first, so
@@ -314,6 +315,7 @@ func forgetCmd(inv invocation, rest []string) error {
 		}
 		if kind == "project" {
 			instruct.RemoveCache(st.paths, proj.ID)
+			team.Remove(st.paths, proj.ID) // the stored keys go with the project; the bucket is untouched
 		}
 		return s.Compact(ctx)
 	})

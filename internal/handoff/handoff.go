@@ -220,10 +220,16 @@ func Read(path string) (File, error) {
 	if err != nil {
 		return f, err
 	}
+	return Parse(raw)
+}
+
+// Parse reads and validates the content of a handoff file.
+func Parse(raw []byte) (File, error) {
+	var f File
 	if len(raw) > MaxFileBytes {
 		return f, fmt.Errorf("%w: the file is larger than %d MB", ErrInvalid, MaxFileBytes>>20)
 	}
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
 		return f, fmt.Errorf("%w: it cannot be read as one (%v)", ErrInvalid, err)
