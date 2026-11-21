@@ -75,6 +75,10 @@ Usage:
   sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]
                                    Record a standing instruction, word for word. Without --yes it
                                    only shows what would be saved. TEXT may be - to read stdin.
+  sessionkeep suggest [--project ID_OR_PATH | --all-projects]
+                                   Requests you made in nearly the same words in three or more
+                                   sessions and that no instruction covers. Found by comparing
+                                   words, not by a model; saves nothing
   sessionkeep instruction list [--all] | show ID
   sessionkeep instruction supersede ID "TEXT" [--reason R] [--yes]
   sessionkeep instruction archive ID [--reason R] [--yes]
@@ -373,6 +377,8 @@ func dispatch(inv invocation) error {
 		return remember(inv, rest)
 	case "instruction":
 		return instructionCmd(inv, rest)
+	case "suggest":
+		return suggestCmd(inv, rest)
 	case "install":
 		if len(rest) != 0 {
 			return usageErr("usage: sessionkeep install [--with-mcp] [--enable-plugin]")

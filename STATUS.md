@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-21 (session 20) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.10.3 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-22 (session 21) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.11.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
@@ -30,7 +30,7 @@
 
 ## State of the owner's computer
 
-- `sessionkeep 0.10.3` is installed by `npm install -g dist/sessionkeep-0.10.3.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.11.0` is installed by `npm install -g dist/sessionkeep-0.11.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). The owner registered projects from the dashboard on 2026-11-21; an import preview there reported 4 sessions "already saved as they happened".
 - **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local`, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
@@ -43,7 +43,21 @@
 - Nothing has been run on Linux, macOS, arm64 or Windows 11 (they compile).
 - No remote exists; all commits are local on `main`.
 
-## Latest session record (session 20, 2026-11-21)
+## Latest session record (session 21, 2026-11-21 to 22)
+
+The owner asked for research into what would make SessionKeep more useful day to day and for teams, then approved the whole recommended list. Built, each as its own commit with the full check passing (D117 to D122), released together as 0.11.0:
+
+- **After a compaction** the next session start also carries the session's last exchanges word for word (D117). Instructions and the checkpoint were already re-sent.
+- **An error met before**: a shell command that fails with an error an earlier session of the project met is answered with what the assistant said then (D118). Database change 0007 (an index).
+- **Recap**: `sessionkeep recap [today|yesterday|week|DATE]` and a Recap page (D119).
+- **Handoff file**: `sessionkeep handoff make` / `receive` gives one project's instructions, checkpoints and optionally sessions to a teammate (D120). Command line only; no dashboard button.
+- **`sessionkeep file PATH`** and **`sessionkeep why COMMIT|FILE:LINE`** (D121). Command line only.
+- **`sessionkeep suggest`** and a "Things you repeat" button on Instructions (D122).
+- Evidence: unit and command tests for each (mock sessions through the real hook entry point). `.tools/smoke_ui.js`: 49 page states. **Not verified: none of this has run in a real Claude Code session or been seen in a browser.** In particular the `compact` session start and the note after a failed command rest on the hook documentation (read 2026-11-21, partly through a summary), not on an observed run.
+- Not built from the approved list: decision drafts (needs a model and a place for approved decisions to live; owner to choose), and shared project memory through Git (ROADMAP phase 9; needs its own threat model).
+- Research sources are listed in the session's report to the owner; none of the tools found were copied from.
+
+## Session 20 record (2026-11-21)
 
 - Agent: Claude Code (claude-fable-5-2). Owner asked for a redesign, rejected the agent's five variants ("just changing color scheme"), asked for a prompt, designed five directions in Claude Design and chose "Margin".
 - Rebuilt `internal/web/ui` (index.html, app.css, app.js) to that design. Decision D115. `design/DESIGN_PROMPT.md` is the prompt the owner used.

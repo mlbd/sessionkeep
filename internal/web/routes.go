@@ -166,6 +166,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 		}
 		s.command(w, args...)
 	})
+	mux.HandleFunc("GET /api/suggestions", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		s.command(w, append([]string{"suggest"}, scope(q.Get("project"), q.Get("all") == "1")...)...)
+	})
 	mux.HandleFunc("GET /api/instructions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		s.command(w, "instruction", "show", "--", r.PathValue("id"))
 	})

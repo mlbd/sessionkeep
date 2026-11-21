@@ -719,9 +719,10 @@ async function instructionsView(sel) {
       v.reason ? el('p', { class: 'small', text: 'Reason: ' + v.reason }) : null))));
   };
 
-  const add = () => {
+  const add = prefill => {
     mark(list, '');
     const text = el('textarea', { id: 'new-text', required: true, rows: '3' });
+    if (typeof prefill === 'string') text.value = prefill;
     const where2 = choice('new-scope', 'Where it applies', [['project', 'One project', 'Only sessions in the project chosen below.'], ['global', 'Every project', 'Every project on the Projects page.']], scope === '*' ? '' : 'project');
     const proj = projectSelect('new-project');
     const check = el('div', {});
@@ -757,7 +758,23 @@ async function instructionsView(sel) {
     const first = rows.find(i => i.id === sel) || rows[0];
     if (first) { mark(list, first.id); detail(first.id); } else pane.replaceChildren();
   };
-  actions.append(btn('Add an instruction', 'primary', add));
+  // Requests made in nearly the same words in several sessions; each can be put into the form.
+  const repeated = async () => {
+    mark(list, '');
+    const heading = 'Things you keep telling Claude';
+    pane.replaceChildren(card(heading, working('Reading your requests.')));
+    const r = await api('GET', `/api/suggestions?${scope === '*' ? 'all=1' : 'project=' + enc(scope)}`);
+    if (!r.ok) return pane.replaceChildren(card(heading, el('p', { class: 'quiet', text: problem(r) })));
+    const found = r.data.suggestions;
+    pane.replaceChildren(card(heading,
+      el('p', { class: 'quiet small', text: `Requests you made in nearly the same words in three or more sessions of ${scopeName()}, and that no instruction covers. They are found by comparing words, not by a model, so read each one. Nothing is saved until you add it.` }),
+      found.length ? found.map(x => el('div', { class: 'confirm' },
+        el('p', { class: 'said', text: x.text }),
+        el('div', { class: 'row' }, btn('Use as an instruction', 'btn', () => add(x.text)),
+          el('span', { class: 'quiet small', text: `In ${plural(x.sessions, 'session', 'sessions')}, last ${nice(x.last_at)}` }))))
+        : el('p', { class: 'quiet', text: 'Nothing is repeated often enough yet.' })));
+  };
+  actions.append(btn('Things you repeat', 'btn', repeated), btn('Add an instruction', 'primary', () => add()));
   view.append(el('div', { class: 'cols' }, list, pane));
   paint();
   selectors.instructions = args => { if (!args[0] || !mine.some(i => i.id === args[0])) return false; sel = args[0]; mark(list, sel); detail(sel); return true; };

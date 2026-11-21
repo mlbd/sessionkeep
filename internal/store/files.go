@@ -79,3 +79,35 @@ func (s *Store) RequestBefore(ctx context.Context, projectID, sessionID string, 
 	}
 	return text, err
 }
+
+// UserText is one thing the user said.
+type UserText struct {
+	SessionID, ProjectID, At, Text string
+}
+
+// UserTexts returns what the user said, newest first, in one project or (projectID empty) in
+// all of them. Very long texts are pasted material, not requests, and are left out.
+func (s *Store) UserTexts(ctx context.Context, projectID string, limit int) ([]UserText, error) {
+	q := `select v.session_id, v.project_id, v.observed_at, e.text from events v
+		join evidence e on e.id = v.evidence_id and e.project_id = v.project_id
+		where e.trust_level = 'user' and e.text is not null and length(e.text) < 4000`
+	args := []any{}
+	if projectID != "" {
+		q += ` and v.project_id = ?`
+		args = append(args, projectID)
+	}
+	rows, err := s.db.QueryContext(ctx, q+` order by v.rowid desc limit ?`, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserText
+	for rows.Next() {
+		var u UserText
+		if err := rows.Scan(&u.SessionID, &u.ProjectID, &u.At, &u.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
