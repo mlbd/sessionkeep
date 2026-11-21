@@ -1,6 +1,6 @@
 # Project status
 
-**Last updated:** 2026-11-22 (session 21) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.11.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
+**Last updated:** 2026-11-22 (session 21) • **Project name:** SessionKeep • **Active phase:** Phase 3 (current research), parts A and B built; **version 0.12.0 installed on the owner's computer through the npm package, plugin on in the owner's active Claude Code account (D107); live capture seen working there** • **Approval:** ADR-0001, 0002, 0003, 0006, 0007 and `phases/PHASE_1_PLAN.md` accepted 2026-11-19; rest-of-Phase-1 defaults accepted 2026-11-20; **Phase 2 accepted by the owner 2026-11-20 (D94)**. Awaiting owner: D73 (look at the redesign), D74 (screenshots taken by the agent), D66 (logon list), D98/D103/D104 (agent's judgements in Phase 3 part A), publishing the npm package (D106). ADR-0004 (Codex) blocked; ADR-0005 (graph parser) proposed.
 
 ## Start here
 
@@ -30,7 +30,7 @@
 
 ## State of the owner's computer
 
-- `sessionkeep 0.11.0` is installed by `npm install -g dist/sessionkeep-0.11.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
+- `sessionkeep 0.12.0` is installed by `npm install -g dist/sessionkeep-0.12.0.tgz` (the `sessionkeep` command is on PATH), with automatic summaries **on** (Sonnet, 20 requests a day; D88) and research fetching **on** (D103), in the per-user programs folder with its generated plugin. `sessionkeep doctor` there: all checks ok.
 - The data directory exists with default settings (unregistered folders: ask). The owner registered projects from the dashboard on 2026-11-21; an import preview there reported 4 sessions "already saved as they happened".
 - **The plugin is turned on in the owner's active (second) Claude Code account** (`plugin list` there: `sessionkeep@sessionkeep-local`, enabled). Claude Code's default account was not touched. It loads at the next start of Claude Code. No auto-start entry exists.
 - claude-mem is untouched.
@@ -54,6 +54,7 @@ The owner asked for research into what would make SessionKeep more useful day to
 - **`sessionkeep file PATH`** and **`sessionkeep why COMMIT|FILE:LINE`** (D121). Command line only.
 - **`sessionkeep suggest`** and a "Things you repeat" button on Instructions (D122).
 - Evidence: unit and command tests for each (mock sessions through the real hook entry point). `.tools/smoke_ui.js`: 49 page states. **Not verified: none of this has run in a real Claude Code session or been seen in a browser.** In particular the `compact` session start and the note after a failed command rest on the hook documentation (read 2026-11-21, partly through a summary), not on an observed run.
+- 0.12.0 (owner asked, D123): a recall mode per project, `asked` (default) or `automatic`. Automatic adds a note of the latest sessions to every session start and, to every request, the stored pieces that share its words. The hook reads the database for that, read-only and time-limited. Database change 0008. No project was switched to automatic by the agent.
 - Not built from the approved list: decision drafts (needs a model and a place for approved decisions to live; owner to choose), and shared project memory through Git (ROADMAP phase 9; needs its own threat model).
 - Research sources are listed in the session's report to the owner; none of the tools found were copied from.
 

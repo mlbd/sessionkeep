@@ -43,7 +43,7 @@ type Report struct {
 
 // orphanAfter is how old a spool temp file must be before its writer is certainly gone: several
 // times the hook's own time limit.
-const orphanAfter = 5 * capture.Deadline
+const orphanAfter = 10 * time.Second // five times the hook deadline
 
 // Deps are the things Drain needs. AfterCommit, if set, runs after each event's transaction has
 // committed and before its spool file is deleted; tests use it to simulate a crash at that point.
@@ -293,6 +293,14 @@ func (d Deps) importGaps(ctx context.Context) (int, error) {
 	return n, os.Remove(pending)
 }
 
+// recallOf is the project's recall mode as the roots cache holds it: empty unless automatic.
+func recallOf(p store.Project) string {
+	if p.Recall == project.RecallAutomatic {
+		return p.Recall
+	}
+	return ""
+}
+
 // RewriteRootsCache refreshes the hook-readable list of registered roots from the database.
 func (d Deps) RewriteRootsCache(ctx context.Context) error {
 	all, err := d.Store.ListProjects(ctx, d.Settings.DeviceID)
@@ -302,7 +310,7 @@ func (d Deps) RewriteRootsCache(ctx context.Context) error {
 	var roots []project.Root
 	for _, p := range all {
 		for _, r := range p.Roots {
-			roots = append(roots, project.Root{Path: r, ProjectID: p.ID, Level: p.CapturePolicy, Paused: p.Paused})
+			roots = append(roots, project.Root{Path: r, ProjectID: p.ID, Level: p.CapturePolicy, Paused: p.Paused, Recall: recallOf(p)})
 		}
 	}
 	return project.WriteRootsCache(d.Paths, roots, d.Now())

@@ -27,6 +27,8 @@ type Project struct {
 	AddedBy       string   `json:"added_by"`
 	CreatedAt     string   `json:"created_at"`
 	Roots         []string `json:"roots"`
+	// Recall is how saved sessions reach a new session: "asked" or "automatic".
+	Recall string `json:"recall"`
 }
 
 // NewProject is the input to AddProject. Root must already be normalized; Level must be valid.
@@ -60,12 +62,12 @@ func (s *Store) AddProject(ctx context.Context, n NewProject) (Project, error) {
 	if err := tx.Commit(); err != nil {
 		return Project{}, err
 	}
-	return Project{ID: n.ID, Name: n.Name, CapturePolicy: n.Level, AddedBy: n.AddedBy, CreatedAt: ts, Roots: []string{n.Root}}, nil
+	return Project{ID: n.ID, Name: n.Name, CapturePolicy: n.Level, AddedBy: n.AddedBy, CreatedAt: ts, Roots: []string{n.Root}, Recall: "asked"}, nil
 }
 
 // ListProjects returns all non-archived projects with their roots on the given device, oldest first.
 func (s *Store) ListProjects(ctx context.Context, deviceID string) ([]Project, error) {
-	rows, err := s.db.QueryContext(ctx, `select p.id, p.name, p.capture_policy, p.paused_at is not null, p.added_by, p.created_at, r.normalized_path
+	rows, err := s.db.QueryContext(ctx, `select p.id, p.name, p.capture_policy, p.paused_at is not null, p.added_by, p.created_at, p.recall, r.normalized_path
 		from projects p left join project_roots r on r.project_id = p.id and r.device_id = ?
 		where p.archived_at is null order by p.created_at, p.id, r.normalized_path`, deviceID)
 	if err != nil {
@@ -76,7 +78,7 @@ func (s *Store) ListProjects(ctx context.Context, deviceID string) ([]Project, e
 	for rows.Next() {
 		var p Project
 		var root sql.NullString
-		if err := rows.Scan(&p.ID, &p.Name, &p.CapturePolicy, &p.Paused, &p.AddedBy, &p.CreatedAt, &root); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.CapturePolicy, &p.Paused, &p.AddedBy, &p.CreatedAt, &p.Recall, &root); err != nil {
 			return nil, err
 		}
 		if n := len(out); n == 0 || out[n-1].ID != p.ID {

@@ -882,11 +882,16 @@ async function projectsView(sel) {
     if (!p) return pane.replaceChildren();
     const [, , words] = savingState(p);
     const level = choice('lvl-' + p.id, 'What is saved', LEVELS, p.capture_level);
+    const recall = choice('rec-' + p.id, 'How Claude gets earlier sessions', [
+      ['asked', 'When asked', 'Claude gets your instructions and the latest checkpoint, and looks into earlier sessions when you refer to them.'],
+      ['automatic', 'Automatically', 'Also: every new session is told what the latest sessions were about, and with every request Claude is handed the saved pieces that share its words. They are picked by matching words, so some will be beside the point.']], p.recall || 'asked');
     pane.replaceChildren(el('section', { class: 'card' },
       el('div', {}, el('h2', { class: 'mono', text: p.name }), el('p', { class: 'path', text: p.roots.join(', ') }), el('p', { class: 'quiet small', text: words + (p.added_by === 'auto' ? ' Added automatically.' : '') })),
       level,
       el('div', { class: 'row' }, btn('Change what is saved', 'btn', () => act(`/api/projects/${p.id}/capture`, { level: level.value() }, 'Changed.')),
         btn(p.paused ? 'Resume saving' : 'Pause saving', p.paused ? 'btn primary' : 'btn', () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Saving again.' : 'Paused.'))),
+      recall,
+      el('div', { class: 'row' }, btn('Change how Claude gets them', 'btn', () => act(`/api/projects/${p.id}/recall`, { mode: recall.value() }, 'Changed. It applies from the next request.'))),
       el('div', { class: 'row' }, btn('Sync with Claude Code', 'btn', () => sync(p), `Bring in sessions of ${p.name} that are not saved yet`),
         el('span', { class: 'quiet small', text: 'Brings in sessions that are not saved yet. It shows what it found first.' })),
       el('p', { class: 'quiet small', text: 'Both of these show what would go and ask before deleting.' }),

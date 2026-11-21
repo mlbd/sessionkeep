@@ -50,6 +50,11 @@ Usage:
                                    Register a folder. LEVEL is required; there is no default.
   sessionkeep project list
   sessionkeep project pause|resume ID_OR_PATH
+  sessionkeep project recall ID_OR_PATH asked|automatic
+                                   How saved sessions reach a new session. asked (the default):
+                                   only when Claude looks them up. automatic: a note of the
+                                   latest sessions at every start, and with every request the
+                                   stored pieces that share its words
   sessionkeep project capture ID_OR_PATH LEVEL
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
@@ -549,7 +554,7 @@ func withStore(st state, fn func(ctx context.Context, s *store.Store) error) err
 	var roots []project.Root
 	for _, p := range all {
 		for _, r := range p.Roots {
-			roots = append(roots, project.Root{Path: r, ProjectID: p.ID, Level: p.CapturePolicy, Paused: p.Paused})
+			roots = append(roots, project.Root{Path: r, ProjectID: p.ID, Level: p.CapturePolicy, Paused: p.Paused, Recall: recallOf(p)})
 		}
 	}
 	if err := project.WriteRootsCache(st.paths, roots, time.Now()); err != nil {
@@ -774,16 +779,19 @@ func projectCmd(inv invocation, rest []string) error {
 		}
 		return inv.emit(added, fmt.Sprintf("registered %s\nproject: %s\nlevel:   %s\n", root, added.ID, level))
 
-	case "pause", "resume", "capture":
+	case "pause", "resume", "capture", "recall":
 		if err := inv.only(); err != nil {
 			return err
 		}
 		want := 1
-		if sub == "capture" {
+		if sub == "capture" || sub == "recall" {
 			want = 2
 		}
 		if len(args) != want {
-			return usageErr("usage: sessionkeep project pause|resume ID_OR_PATH, or sessionkeep project capture ID_OR_PATH LEVEL")
+			return usageErr("usage: sessionkeep project pause|resume ID_OR_PATH, sessionkeep project capture ID_OR_PATH LEVEL, or sessionkeep project recall ID_OR_PATH asked|automatic")
+		}
+		if sub == "recall" && args[1] != "asked" && args[1] != project.RecallAutomatic {
+			return usageErr("recall must be asked or automatic (got %q)", args[1])
 		}
 		if sub == "capture" && !config.ValidLevel(args[1]) {
 			return usageErr("LEVEL must be off, metadata, conversation or extended (got %q)", args[1])
@@ -808,6 +816,8 @@ func projectCmd(inv invocation, rest []string) error {
 				err = s.SetPaused(ctx, p.ID, true, time.Now())
 			case "resume":
 				err = s.SetPaused(ctx, p.ID, false, time.Now())
+			case "recall":
+				err = s.SetRecall(ctx, p.ID, args[1])
 			default:
 				err = s.SetCaptureLevel(ctx, p.ID, args[1])
 			}
@@ -918,6 +928,14 @@ func sessionCmd(inv invocation, rest []string) error {
 		}
 	}
 	return inv.emit(out, b.String())
+}
+
+// recallOf is the project's recall mode as the roots cache holds it: empty unless automatic.
+func recallOf(p store.Project) string {
+	if p.Recall == project.RecallAutomatic {
+		return p.Recall
+	}
+	return ""
 }
 
 // workDir picks the folder whose Git state belongs to a project for this invocation: the folder

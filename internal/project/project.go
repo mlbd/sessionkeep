@@ -23,7 +23,11 @@ type Root struct {
 	ProjectID string `json:"project_id"`
 	Level     string `json:"level"`
 	Paused    bool   `json:"paused"`
+	Recall    string `json:"recall,omitempty"` // RecallAutomatic, or empty for "when asked"
 }
+
+// RecallAutomatic is the recall mode in which saved sessions are given to a session unasked.
+const RecallAutomatic = "automatic"
 
 // Actions a Decision can carry.
 const (
@@ -40,6 +44,7 @@ type Decision struct {
 	Level     string `json:"level,omitempty"`
 	Root      string `json:"root,omitempty"`
 	Reason    string `json:"reason"`
+	Recall    string `json:"recall,omitempty"`
 }
 
 // Normalize turns an absolute path into the comparison form for goos: one separator style, no
@@ -163,11 +168,11 @@ func Decide(env Env, s config.Settings, roots []Root, cwd string) Decision {
 	if best != nil {
 		switch {
 		case best.Paused:
-			return Decision{Action: ActionNone, ProjectID: best.ProjectID, Root: best.Path, Reason: "project is paused"}
+			return Decision{Action: ActionNone, ProjectID: best.ProjectID, Root: best.Path, Reason: "project is paused", Recall: best.Recall}
 		case best.Level == config.LevelOff || !config.ValidLevel(best.Level):
-			return Decision{Action: ActionNone, ProjectID: best.ProjectID, Root: best.Path, Reason: "capture is off for this project"}
+			return Decision{Action: ActionNone, ProjectID: best.ProjectID, Root: best.Path, Reason: "capture is off for this project", Recall: best.Recall}
 		}
-		return Decision{Action: ActionCapture, ProjectID: best.ProjectID, Level: best.Level, Root: best.Path, Reason: "registered project"}
+		return Decision{Action: ActionCapture, ProjectID: best.ProjectID, Level: best.Level, Root: best.Path, Reason: "registered project", Recall: best.Recall}
 	}
 	switch s.AutoAdd.Mode {
 	case config.ModeAsk:

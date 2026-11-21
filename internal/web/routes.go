@@ -83,11 +83,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{id}/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Level string `json:"level"`
+			Mode  string `json:"mode"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
 		switch a := r.PathValue("action"); a {
+		case "recall":
+			s.command(w, "project", "recall", "--", r.PathValue("id"), in.Mode)
 		case "pause", "resume":
 			s.command(w, "project", a, "--", r.PathValue("id"))
 		case "capture":

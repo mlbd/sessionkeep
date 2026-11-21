@@ -60,6 +60,7 @@ type Cache struct {
 	Items      []Item      `json:"instructions"`
 	Checkpoint *Checkpoint `json:"checkpoint,omitempty"`
 	Research   *Research   `json:"research,omitempty"`
+	History    []Past      `json:"history,omitempty"`
 }
 
 // Claim is one researched fact that has a checked source, as cached for the hook path.
@@ -82,8 +83,13 @@ type Research struct {
 const MaxCachedClaims = 200
 
 // stamp identifies everything a cache file carries, to tell whether it needs rewriting.
-func stamp(items []Item, cp *Checkpoint, rs *Research) string {
+func stamp(items []Item, cp *Checkpoint, rs *Research, hist []Past) string {
 	s := SetDigest(items)
+	for _, p := range hist {
+		// The text is part of it: deleting a record must rewrite a file that quotes it.
+		sum := sha256.Sum256([]byte(p.First + "\x00" + p.Summary))
+		s += fmt.Sprintf(":%s/%x", p.Session, sum[:6])
+	}
 	if cp != nil {
 		s += ":" + cp.ID
 	}
@@ -173,10 +179,16 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 				return err
 			}
 		}
-		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint, old.Research) == stamp(items, cp, rs) {
+		var hist []Past
+		if id != "" {
+			if hist, err = pastSessions(ctx, s, id); err != nil {
+				return err
+			}
+		}
+		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint, old.Research, old.History) == stamp(items, cp, rs, hist) {
 			continue
 		}
-		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items, Checkpoint: cp, Research: rs}, "", " ")
+		raw, err := json.MarshalIndent(Cache{Version: 1, WrittenAt: now.UTC().Format(time.RFC3339), ProjectID: id, Items: items, Checkpoint: cp, Research: rs, History: hist}, "", " ")
 		if err != nil {
 			return err
 		}

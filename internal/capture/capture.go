@@ -1,7 +1,9 @@
 // Package capture is the Claude Code hook adapter: it turns one hook payload into at most one
 // durable spool file. It runs inside a short-lived process on the user's critical path, so it
-// never opens the database, never touches the network, and never returns an error to the host
-// (ADR-0002, ADR-0003).
+// never writes to the database, never touches the network, and never returns an error to the
+// host (ADR-0002, ADR-0003). It reads the database in one case only: a request in a project
+// whose owner chose automatic recall is searched for, read-only and for a fraction of a second
+// at most (D123).
 package capture
 
 import (
@@ -35,7 +37,8 @@ const TimeFormat = "2006-01-02T15:04:05.000000000Z"
 
 // Deadline is how long a hook may spend before it gives up silently. Typical runs take about
 // 15 ms; the bound exists for a stalled disk, and is generous because giving up loses the event.
-const Deadline = 2 * time.Second
+// A variable so that a slow test run can wait longer.
+var Deadline = 2 * time.Second
 
 // kinds maps supported hook events to normalized event kinds. Anything else is ignored.
 var kinds = map[string]string{
@@ -253,16 +256,27 @@ func recallContext(req Request, in hookInput, d project.Decision) []byte {
 	text := ""
 	if cache != nil {
 		digest := instruct.SetDigest(cache.Items)
-		if req.HookEvent == "UserPromptSubmit" && instruct.AlreadySent(req.Paths, session, digest) {
-			return nil
+		if req.HookEvent == "SessionStart" || !instruct.AlreadySent(req.Paths, session, digest) {
+			// The note about stale researched facts is given once, when the session starts.
+			var at time.Time
+			if req.HookEvent == "SessionStart" {
+				at = req.Now
+			}
+			if text, _ = instruct.Envelope(cache, at); text != "" {
+				instruct.MarkSent(req.Paths, session, digest)
+			}
 		}
-		// The note about stale researched facts is given once, when the session starts.
-		var at time.Time
-		if req.HookEvent == "SessionStart" {
-			at = req.Now
-		}
-		if text, _ = instruct.Envelope(cache, at); text != "" {
-			instruct.MarkSent(req.Paths, session, digest)
+	}
+	// Automatic recall, where the owner chose it for the project: what the latest sessions were
+	// about at every start, and with every request the stored pieces that share its words.
+	if d.Recall == project.RecallAutomatic && d.ProjectID != "" {
+		switch {
+		case req.HookEvent == "SessionStart" && cache != nil:
+			text = instruct.WithHistory(cache, session, text)
+		case req.HookEvent == "UserPromptSubmit":
+			if note := instruct.RelatedNote(req.Paths, d.ProjectID, session, in.Prompt, instruct.Budget-instruct.Units(text)-1); note != "" {
+				text = strings.TrimPrefix(text+"\n"+note, "\n")
+			}
 		}
 	}
 	savesText := d.Level == config.LevelConversation || d.Level == config.LevelExtended
