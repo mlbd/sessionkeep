@@ -240,7 +240,7 @@ async function act(path, body, done) {
 // Brings one project up to date with what Claude Code has on this computer: first stores the
 // events that are still waiting, then looks in Claude Code's own session files for anything
 // that is not saved yet. What it found is shown before anything is imported.
-async function sync(p) {
+async function sync(p, justAdded) {
   say(`Looking for sessions of ${p.name} that are not saved yet. This can take a minute.`);
   const waiting = await api('POST', '/api/ingest');
   const stored = waiting.ok && waiting.data ? waiting.data.ingested || 0 : 0;
@@ -249,10 +249,11 @@ async function sync(p) {
   const d = r.data;
   if (!d.turns) {
     if (stored) await reload();
+    if (justAdded) return say(`Project added. Claude Code has no earlier sessions of ${p.name} to bring in.`, 'ok');
     return say((stored ? `Stored ${plural(stored, 'waiting event', 'waiting events')}. ` : '') + `Nothing else to bring in: everything Claude Code still has for ${p.name} is already saved.`, 'ok');
   }
-  say('Nothing is imported yet.');
-  openDialog(`Bring ${p.name} up to date?`, [
+  say(justAdded ? 'Project added. Its earlier sessions are not imported yet.' : 'Nothing is imported yet.');
+  openDialog(justAdded ? `Also bring in the earlier sessions of ${p.name}?` : `Bring ${p.name} up to date?`, [
     el('p', {}, `Claude Code has ${plural(d.turns, 'piece of text', 'pieces of text')} from ${plural(d.sessions, 'session', 'sessions')} that SessionKeep has not saved.`),
     el('p', { class: 'quiet small', text: `Left out: ${plural(d.sessions_captured_live_skipped, 'session', 'sessions')} already saved as they happened, ${d.turns_in_excluded_folders} pieces in excluded folders, ${d.turns_in_paused_or_text_free_projects} in paused or text-free projects. Claude\u2019s private reasoning, tool output and images are never imported.` }),
   ], [
@@ -844,7 +845,15 @@ async function projectsView(sel) {
   const path = el('input', { type: 'text', id: 'add-path', class: 'code', required: true, autocomplete: 'off', placeholder: 'C:\\Work\\my-project' });
   const name = el('input', { type: 'text', id: 'add-name', autocomplete: 'off' });
   const addLevel = select('add-level', LEVELS.map(l => [l[0], l[1]]), 'conversation');
-  const addCard = card('Add a project', el('form', { onsubmit: e => { e.preventDefault(); return act('/api/projects', { path: path.value, level: addLevel.value, name: name.value }, 'Project added.'); } },
+  // A new project that saves text is offered its earlier Claude Code sessions straight away.
+  const addProject = async e => {
+    e.preventDefault();
+    const saveText = addLevel.value === 'conversation' || addLevel.value === 'extended';
+    const r = await act('/api/projects', { path: path.value, level: addLevel.value, name: name.value }, 'Project added.');
+    const added = r.ok && r.data ? projects.find(p => p.id === r.data.id) : null;
+    if (added && saveText) await sync(added, true);
+  };
+  const addCard = card('Add a project', el('form', { onsubmit: addProject },
     field('Folder', path, 'The full path. Everything inside it counts as this project.'),
     el('div', { class: 'pair' }, field('What is saved', addLevel), field('Name', name, 'Optional. The folder name is used if empty.')),
     el('button', { type: 'submit', class: 'strong start', text: 'Add project and start saving' })));
