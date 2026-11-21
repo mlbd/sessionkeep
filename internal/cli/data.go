@@ -259,6 +259,7 @@ func forgetCmd(inv invocation, rest []string) error {
 	var removed store.Removal
 	var what string
 	var proj store.Project
+	var recProject string
 	err = withStore(st, func(ctx context.Context, s *store.Store) error {
 		switch kind {
 		case "record":
@@ -271,6 +272,7 @@ func forgetCmd(inv invocation, rest []string) error {
 			if err != nil {
 				return err
 			}
+			recProject = rec.ProjectID
 			what = fmt.Sprintf("the record %.12s in project %q, said by %s at %s:\n----\n%s\n----", rec.ID, rec.ProjectName, rec.Who, rec.ObservedAt, firstRunes(rec.Text, 300))
 			removed, err = s.ForgetRecord(ctx, rec.ID, apply)
 		case "captured":
@@ -298,6 +300,17 @@ func forgetCmd(inv invocation, rest []string) error {
 			instruct.RemoveRecent(st.paths, "")
 		} else {
 			instruct.RemoveRecent(st.paths, proj.ID)
+		}
+		// The index of known errors quotes stored text; it is rebuilt from what is left.
+		if kind == "record" {
+			instruct.RemoveErrorIndex(st.paths, recProject)
+		} else {
+			instruct.RemoveErrorIndex(st.paths, proj.ID)
+		}
+		if kind != "project" {
+			if err := instruct.RewriteCaches(ctx, s, st.paths, st.settings.DeviceID, time.Now()); err != nil {
+				return err
+			}
 		}
 		if kind == "project" {
 			instruct.RemoveCache(st.paths, proj.ID)

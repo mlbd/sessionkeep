@@ -201,6 +201,14 @@ func Handle(req Request) (res Result) {
 	if err := writeDurable(req.Paths.SpoolDir, name, raw); err != nil {
 		return Result{Action: d.Action, Stdout: recall, Gap: gap(req, "spool_write_failed")}
 	}
+	// A command that failed with an error an earlier session already met: say what was said then.
+	if s, _ := ev.Payload["error"].(string); req.HookEvent == "PostToolUseFailure" && d.ProjectID != "" && (in.IsInterrupt == nil || !*in.IsInterrupt) {
+		if note := instruct.KnownErrorNote(req.Paths, d.ProjectID, in.SessionID, in.ToolName, s); note != "" {
+			if out, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{"hookEventName": req.HookEvent, "additionalContext": note}}); err == nil {
+				recall = append(out, '\n')
+			}
+		}
+	}
 	// Keep the exchange for the hook path too, so it can be given back after a compaction.
 	if d.ProjectID != "" {
 		if s, _ := ev.Payload["prompt"].(string); req.HookEvent == "UserPromptSubmit" {

@@ -168,6 +168,11 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 				}
 			}
 		}
+		if id != "" {
+			if err := rewriteErrorIndex(ctx, s, p, id); err != nil {
+				return err
+			}
+		}
 		if old, err := Load(p, id, false); err == nil && old != nil && stamp(old.Items, old.Checkpoint, old.Research) == stamp(items, cp, rs) {
 			continue
 		}

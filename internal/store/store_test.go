@@ -109,8 +109,8 @@ func TestOpenMigratesFromEmptyAndSetsPragmas(t *testing.T) {
 	s.db.QueryRow("pragma journal_mode").Scan(&mode)
 	s.db.QueryRow("pragma foreign_keys").Scan(&fk)
 	s.db.QueryRow("pragma synchronous").Scan(&sync)
-	if n != 6 || mode != "wal" || fk != 1 || sync != 2 {
-		t.Fatalf("migrations=%d journal_mode=%s foreign_keys=%d synchronous=%d; want 6, wal, 1, 2(FULL)", n, mode, fk, sync)
+	if n != 7 || mode != "wal" || fk != 1 || sync != 2 {
+		t.Fatalf("migrations=%d journal_mode=%s foreign_keys=%d synchronous=%d; want 7, wal, 1, 2(FULL)", n, mode, fk, sync)
 	}
 	for _, table := range []string{"projects", "project_roots", "sessions", "blobs", "evidence", "events", "capture_gaps", "instructions", "instruction_versions", "jobs", "evidence_fts"} {
 		var name string
