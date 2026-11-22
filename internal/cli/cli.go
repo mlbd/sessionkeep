@@ -60,6 +60,8 @@ Usage:
                                    After you renamed or moved a project's folder: point the
                                    project at the new place, so its saved sessions stay with it
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
+  sessionkeep folders [PATH]           List the folders inside PATH (default: your home folder), for
+                                   choosing a project folder; reads only, never lists files
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
   sessionkeep memory search "QUERY" [--project ID_OR_PATH | --all-projects] [--exact]
@@ -440,6 +442,8 @@ func dispatch(inv invocation) error {
 			return err
 		}
 		return pluginWrite(inv, rest[1])
+	case "folders":
+		return foldersCmd(inv, rest)
 	case "exclude":
 		return exclude(inv, rest)
 	case "project":

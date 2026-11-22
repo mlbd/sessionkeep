@@ -85,6 +85,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 		var in struct {
 			Level string `json:"level"`
 			Mode  string `json:"mode"`
+			To    string `json:"to"`   // move: the folder's new place
+			Name  string `json:"name"` // move: a new name, optional
 		}
 		if !decode(w, r, &in) {
 			return
@@ -96,9 +98,24 @@ func (s *Server) routes(mux *http.ServeMux) {
 			s.command(w, "project", a, "--", r.PathValue("id"))
 		case "capture":
 			s.command(w, "project", "capture", "--", r.PathValue("id"), in.Level)
+		case "move":
+			args := []string{"project", "move"}
+			if in.Name != "" {
+				args = append(args, flag("name", in.Name))
+			}
+			s.command(w, append(args, "--", r.PathValue("id"), in.To)...)
 		default:
 			fail(w, http.StatusNotFound, "not_found", "no such action")
 		}
+	})
+
+	// The folder chooser: folder names only, never files (the command reads nothing else).
+	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
+		args := []string{"folders"}
+		if p := r.URL.Query().Get("path"); p != "" {
+			args = append(args, "--", p)
+		}
+		s.command(w, args...)
 	})
 
 	// Search and records.
@@ -270,6 +287,21 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// Researched facts. Listing reads only what is stored and the project's lock files. "check"
 	// fetches the fact's source page again; it is the owner's click and is refused while
 	// fetching is turned off.
+	// Whether SessionKeep may fetch pages to check a fact. Turning it on is the owner's consent.
+	mux.HandleFunc("GET /api/research/fetching", func(w http.ResponseWriter, r *http.Request) { s.command(w, "research", "status") })
+	mux.HandleFunc("POST /api/research/fetching", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			On bool `json:"on"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.On {
+			s.command(w, "research", "on", "--yes")
+			return
+		}
+		s.command(w, "research", "off")
+	})
 	mux.HandleFunc("GET /api/research", func(w http.ResponseWriter, r *http.Request) {
 		args := []string{"research", "list", flag("project", r.URL.Query().Get("project")), flag("limit", "200")}
 		if r.URL.Query().Get("all") == "1" {
