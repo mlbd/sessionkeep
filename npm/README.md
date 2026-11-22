@@ -36,6 +36,113 @@ conversation`) or choose automatic mode (`sessionkeep setup --auto-add auto --le
 To install the command without any setup: set `SESSIONKEEP_SKIP_SETUP=1`, or use
 `npm install -g --ignore-scripts`, and run `sessionkeep install` yourself later.
 
+## Share projects through your own Cloudflare R2 (optional)
+
+By default nothing leaves your computer. To exchange a project's memory with colleagues, you give
+SessionKeep a storage bucket in a Cloudflare account you or your team own. There is no SessionKeep
+server: each computer sends and receives bundles directly, and every bundle is encrypted on the
+sending computer with a passphrase the people sharing that project agree on. Cloudflare bills R2
+use to the account that owns the bucket.
+
+### Where a shared project goes
+
+Each shared project goes to one of these, chosen when you turn sharing on for it:
+
+- **Personal storage**: your own bucket. Used unless you choose otherwise.
+- **Shared storage**: a bucket you share with others, such as your company's.
+- **A bucket of its own**: another bucket for this project only, such as one a client gave you.
+
+Personal and shared storage are saved once on your computer, so sharing another project through
+them needs only a name and a passphrase. A bucket of its own is kept with its project. So you can
+keep your private projects in your own bucket, work on company projects through the company's
+bucket, and give a client project the client's bucket, all at the same time.
+
+### 1. In Cloudflare (once per bucket, by whoever owns the account)
+
+1. In the Cloudflare dashboard, go to **Storage & databases > R2**. R2 has to be enabled
+   (purchased) on the account before Cloudflare lets you create R2 tokens.
+2. **Create bucket**, for example `sessionkeep-team`.
+3. On the R2 **Overview** page, select **Manage** next to **API Tokens**, then
+   **Create Account API token** (or **Create User API token**).
+4. Permission: **Object Read & Write**, and **Apply to specific buckets only** with your bucket.
+5. Create the token and copy the **Access Key ID** and **Secret Access Key** (the secret is shown
+   only once). The confirmation page also shows the S3 endpoint,
+   `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`; it is on the R2 Overview page too.
+
+For a bucket several people use, make one token per person. To take someone's access away,
+delete their token. Colleagues do not need a Cloudflare account of their own to use your bucket.
+
+Cloudflare's own instructions: https://developers.cloudflare.com/r2/api/tokens/
+
+### 2. On each computer: from the dashboard
+
+Run `sessionkeep dashboard` and open the address it prints.
+
+1. **Settings > Cloud storage for shared projects** has two parts, **Personal storage** and
+   **Shared storage**. Set up the ones you use: the storage address (the endpoint above), the
+   bucket name, both keys and your name. When it says the bucket answered, the storage is saved.
+   Nothing is sent yet. The keys are kept protected on this computer and never shown again.
+2. **Projects**, on the project: **Share through the cloud**. Choose where it is kept (personal,
+   shared, or a bucket of its own, whose address and keys you then type in the same dialog), a
+   shared project name (lower-case letters, digits and dashes) and a passphrase of at least 12
+   characters. The first person makes the name and passphrase up.
+3. **Sync now** receives your colleagues' work and then sends yours. Sync only happens when you
+   press it. The project's panel says which storage and bucket it uses.
+
+A colleague joins a project you share by doing the same on their computer with the **same
+bucket** (their own keys to it), the **same shared project name** and the **same passphrase**.
+Their own personal storage can be a different bucket; it is not touched.
+
+### 2. On each computer: from the command line (alternative)
+
+Keys and passphrases are read only from the environment, never from the command line. Run the
+`connect` lines inside the project's folder (or add `--project ID_OR_PATH`).
+
+macOS / Linux:
+
+    read -rs SESSIONKEEP_TEAM_ACCESS_KEY; read -rs SESSIONKEEP_TEAM_SECRET_KEY
+    export SESSIONKEEP_TEAM_ACCESS_KEY SESSIONKEEP_TEAM_SECRET_KEY
+    sessionkeep team storage --endpoint https://<ACCOUNT_ID>.r2.cloudflarestorage.com --bucket my-bucket --from "Your Name"
+    read -rs SESSIONKEEP_TEAM_PASSPHRASE; export SESSIONKEEP_TEAM_PASSPHRASE
+    sessionkeep team connect --name my-project
+    sessionkeep team sync          # shows what would be received and sent
+    sessionkeep team sync --yes    # does it
+
+Windows PowerShell:
+
+    $env:SESSIONKEEP_TEAM_ACCESS_KEY = Read-Host "Access Key ID"
+    $env:SESSIONKEEP_TEAM_SECRET_KEY = Read-Host "Secret Access Key"
+    sessionkeep team storage --endpoint https://<ACCOUNT_ID>.r2.cloudflarestorage.com --bucket my-bucket --from "Your Name"
+    $env:SESSIONKEEP_TEAM_PASSPHRASE = Read-Host "Passphrase"
+    sessionkeep team connect --name my-project
+    sessionkeep team sync
+    sessionkeep team sync --yes
+
+That uses the personal storage. For the others (set the keys in the environment first, as above):
+
+    sessionkeep team storage --storage shared --endpoint URL --bucket company-bucket   # save the shared storage
+    sessionkeep team connect --name company-app --storage shared                       # share through it
+    sessionkeep team connect --name client-site --endpoint URL --bucket client-bucket  # a bucket of its own
+
+After that the keys and passphrase are saved, so later syncs need only
+`sessionkeep team sync --yes`. `sessionkeep team list` shows each storage and which projects use
+it; `sessionkeep team` lists every form.
+
+### Good to know
+
+- What is sent for a shared project: its instructions, checkpoints and the text of its sessions
+  (`sessionkeep team push --no-sessions` leaves the sessions out). Code is not sent; use Git for that.
+- One bucket can hold many shared projects. Each has its own name and passphrase, and one
+  project's passphrase cannot open another's. Someone with keys to the bucket can see that other
+  projects' bundles exist (their names are hashed, and their sizes show), but cannot read them.
+- The passphrase cannot be changed afterwards, and without it the bundles cannot be read. Keep it
+  somewhere safe. To lock someone out of future work, delete their token and share again under
+  a new shared name with a new passphrase. What they already received stays with them.
+- Forgetting a saved storage leaves the projects already shared through it working; SessionKeep
+  never deletes anything from a bucket.
+- Cloudflare R2 is the service this has been used with. Other S3-compatible services may work
+  (`--region` sets the region; R2 uses `auto`).
+
 ## Remove
 
     sessionkeep uninstall          (your data is kept unless you add --purge-data)

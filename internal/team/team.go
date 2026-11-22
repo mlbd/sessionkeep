@@ -52,8 +52,11 @@ type Secrets struct {
 	Passphrase string `json:"passphrase"`
 }
 
-// Storage is the bucket this computer uses for every project it shares, saved once so that
-// sharing another project needs only a shared name and a passphrase. Its keys are kept sealed.
+// Storage is a bucket saved once on this computer, so that sharing a project through it needs
+// only a shared name and a passphrase. Its keys are kept sealed. There are two: "personal" (the
+// owner's own bucket, used unless another is chosen) and "shared" (one the owner shares with
+// others, such as a company's). A project may also use a bucket of its own (custom), which is
+// kept only in its connection.
 type Storage struct {
 	Endpoint string `json:"endpoint"`
 	Bucket   string `json:"bucket"`
@@ -63,8 +66,26 @@ type Storage struct {
 	SavedAt  string `json:"saved_at,omitempty"`
 }
 
+// The names of the saved storages.
+const (
+	Personal = "personal"
+	Shared   = "shared"
+	// Custom describes a project that uses a bucket of its own; nothing is saved under it.
+	Custom = "custom"
+)
+
+// CheckSlot says whether name is one of the saved storages.
+func CheckSlot(name string) error {
+	if name != Personal && name != Shared {
+		return fmt.Errorf("the storage is %q or %q, not %q", Personal, Shared, name)
+	}
+	return nil
+}
+
 type configFile struct {
-	Version     int                   `json:"version"`
+	Version  int                `json:"version"`
+	Storages map[string]Storage `json:"storages,omitempty"`
+	// Storage is the single storage of version 1 files; it is read as the personal one.
 	Storage     *Storage              `json:"storage,omitempty"`
 	Connections map[string]Connection `json:"connections"`
 }
@@ -98,7 +119,7 @@ func statePath(p config.Paths, projectID string) string {
 }
 
 func load(p config.Paths) (configFile, error) {
-	c := configFile{Version: 1, Connections: map[string]Connection{}}
+	c := configFile{Version: 2, Storages: map[string]Storage{}, Connections: map[string]Connection{}}
 	raw, err := fsx.ReadFile(configPath(p))
 	if errors.Is(err, os.ErrNotExist) {
 		return c, nil
@@ -106,12 +127,23 @@ func load(p config.Paths) (configFile, error) {
 	if err != nil {
 		return c, err
 	}
-	if err := json.Unmarshal(raw, &c); err != nil || c.Version != 1 {
+	if err := json.Unmarshal(raw, &c); err != nil || (c.Version != 1 && c.Version != 2) {
 		return c, errors.New("the team settings file is damaged; connect the project again")
 	}
 	if c.Connections == nil {
 		c.Connections = map[string]Connection{}
 	}
+	if c.Storages == nil {
+		c.Storages = map[string]Storage{}
+	}
+	// Version 1 had one storage; it becomes the personal one.
+	if c.Storage != nil {
+		if _, taken := c.Storages[Personal]; !taken {
+			c.Storages[Personal] = *c.Storage
+		}
+		c.Storage = nil
+	}
+	c.Version = 2
 	return c, nil
 }
 
@@ -171,17 +203,24 @@ func Connections(p config.Paths) (map[string]Connection, error) {
 	return c.Connections, err
 }
 
-// GetStorage returns the saved storage and its keys. When none was saved but a project is
-// connected, the storage of the most recently connected project stands in, so that someone who
-// connected one project in a terminal is not asked for the same keys again. saved says which.
-func GetStorage(p config.Paths) (s Storage, keys Secrets, ok, saved bool, err error) {
+// GetStorage returns a saved storage and its keys. When no personal storage was saved but a
+// project is connected, the storage of the most recently connected project stands in for it, so
+// that someone who connected one project in a terminal is not asked for the same keys again.
+// saved says which. The shared storage has no stand-in.
+func GetStorage(p config.Paths, slot string) (s Storage, keys Secrets, ok, saved bool, err error) {
+	if err := CheckSlot(slot); err != nil {
+		return s, keys, false, false, err
+	}
 	c, err := load(p)
 	if err != nil {
 		return s, keys, false, false, err
 	}
-	if c.Storage != nil {
-		keys, err = unseal(c.Storage.Sealed)
-		return *c.Storage, keys, true, true, err
+	if got, found := c.Storages[slot]; found {
+		keys, err = unseal(got.Sealed)
+		return got, keys, true, true, err
+	}
+	if slot != Personal {
+		return s, keys, false, false, nil
 	}
 	var latest *Connection
 	for id := range c.Connections {
@@ -198,9 +237,29 @@ func GetStorage(p config.Paths) (s Storage, keys Secrets, ok, saved bool, err er
 	return Storage{Endpoint: latest.Endpoint, Bucket: latest.Bucket, Region: latest.Region, As: latest.As}, keys, true, false, err
 }
 
-// PutStorage saves the storage with its keys sealed. Projects already connected to the same
+// SlotOf says which saved storage a connection goes to: Personal or Shared when its endpoint and
+// bucket are those of a saved storage (personal first), otherwise Custom.
+func SlotOf(storages map[string]Storage, conn Connection) string {
+	for _, slot := range []string{Personal, Shared} {
+		if s, ok := storages[slot]; ok && s.Endpoint == conn.Endpoint && s.Bucket == conn.Bucket {
+			return slot
+		}
+	}
+	return Custom
+}
+
+// Storages returns the saved storages by name. No key is opened.
+func Storages(p config.Paths) (map[string]Storage, error) {
+	c, err := load(p)
+	return c.Storages, err
+}
+
+// PutStorage saves a storage with its keys sealed. Projects already connected to the same
 // endpoint and bucket get the new keys too, so replacing a key is done in one place.
-func PutStorage(p config.Paths, s Storage, keys Secrets) error {
+func PutStorage(p config.Paths, slot string, s Storage, keys Secrets) error {
+	if err := CheckSlot(slot); err != nil {
+		return err
+	}
 	keys.Passphrase = ""
 	sealed, err := seal(keys)
 	if err != nil {
@@ -211,7 +270,7 @@ func PutStorage(p config.Paths, s Storage, keys Secrets) error {
 	if err != nil {
 		return err
 	}
-	c.Storage = &s
+	c.Storages[slot] = s
 	for id, conn := range c.Connections {
 		if conn.Endpoint != s.Endpoint || conn.Bucket != s.Bucket {
 			continue
@@ -229,13 +288,16 @@ func PutStorage(p config.Paths, s Storage, keys Secrets) error {
 	return save(p, c)
 }
 
-// RemoveStorage forgets the saved storage. Connected projects keep their own copy of the keys.
-func RemoveStorage(p config.Paths) error {
+// RemoveStorage forgets a saved storage. Connected projects keep their own copy of the keys.
+func RemoveStorage(p config.Paths, slot string) error {
+	if err := CheckSlot(slot); err != nil {
+		return err
+	}
 	c, err := load(p)
 	if err != nil {
 		return err
 	}
-	c.Storage = nil
+	delete(c.Storages, slot)
 	return save(p, c)
 }
 

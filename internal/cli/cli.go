@@ -126,13 +126,15 @@ Usage:
                                    checkpoints and, if you ask, what was said in its sessions,
                                    in one readable file (not encrypted). Both show what would
                                    happen first; receive adds it to a project you registered
-  sessionkeep team storage --endpoint URL --bucket BUCKET [--from YOUR-NAME]
-  sessionkeep team connect --name SHARED-NAME | sync [--yes] | list | status | disconnect [--yes]
-                                   Keep one project's memory in a storage bucket you chose
+  sessionkeep team storage [--storage personal|shared] --endpoint URL --bucket BUCKET [--from YOUR-NAME]
+  sessionkeep team connect --name SHARED-NAME [--storage shared] | sync [--yes] | list | status | disconnect [--yes]
+                                   Keep a project's memory in a storage bucket you chose
                                    (Cloudflare R2 or another S3-compatible service) and exchange
-                                   it with colleagues who connect the same shared name. What is
-                                   sent is encrypted here first with the team passphrase; push
-                                   and pull show what would happen and need --yes. Run
+                                   it with colleagues who connect the same shared name. Your
+                                   personal storage is used unless you pick the shared one or
+                                   give the project a bucket of its own (--endpoint, --bucket).
+                                   What is sent is encrypted here first with the team passphrase;
+                                   push and pull show what would happen and need --yes. Run
                                    "sessionkeep team" for how the keys are given
   sessionkeep forget record ID | captured --project P | project P   [--yes]
                                    Permanently delete stored data; without --yes it only shows
@@ -211,7 +213,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		}
 		return ExitOK
 	}
-	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes", "endpoint", "bucket", "region")
+	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes", "endpoint", "bucket", "region", "storage")
 	if err == nil {
 		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
 		err = dispatch(inv)

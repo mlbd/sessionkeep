@@ -123,8 +123,8 @@ function select(id, options, value) {
 // A group of radio tiles: every option is visible together with what it means.
 function choice(name, legend, options, value) {
   const tiles = el('div', { class: 'tiles' });
-  for (const [v, label, meaning] of options) {
-    const input = el('input', { type: 'radio', name, value: v, checked: v === value });
+  for (const [v, label, meaning, disabled] of options) {
+    const input = el('input', { type: 'radio', name, value: v, checked: v === value, disabled: !!disabled });
     tiles.append(el('label', { class: 'tile' }, input, el('b', { text: label }), el('span', { text: meaning })));
   }
   const set = el('fieldset', {}, el('legend', { text: legend }), tiles);
@@ -272,80 +272,121 @@ async function sync(p, justAdded) {
 
 // Which storage is saved on this computer and which projects are shared through it. A project
 // is never sent anywhere unless sharing was turned on for it here.
-let team = { storage: { set: false }, projects: {} };
+let team = { storage: { set: false }, storages: { personal: { set: false }, shared: { set: false } }, projects: {} };
 async function loadTeam() {
   const r = await api('GET', '/api/team/overview');
-  if (r.ok && r.data && r.data.storage) team = r.data;
+  if (r.ok && r.data && r.data.storages) team = r.data;
   return r;
 }
+
+// The two storages saved once on this computer. Personal is used unless another is chosen.
+const STORAGES = {
+  personal: { title: 'Personal storage', what: 'Your own bucket. Projects you share go here unless you choose otherwise.' },
+  shared: { title: 'Shared storage', what: 'A bucket you share with others, such as your company\'s. Each person who uses it has their own keys to it.' },
+};
+// How a shared project's place is named on the Projects page.
+const placeOf = shared => shared.storage === 'personal' ? 'your personal storage' : shared.storage === 'shared' ? 'the shared storage' : 'a bucket of its own';
 
 // A line inside a dialog for what went wrong, so that what was typed is not lost.
 const alertLine = () => el('p', { class: 'oops', role: 'alert' });
 const countLine = c => `${plural(c.instructions, 'instruction', 'instructions')}, ${plural(c.checkpoints, 'checkpoint', 'checkpoints')} and ${plural(c.pieces_of_text, 'piece of text', 'pieces of text')} from ${plural(c.sessions, 'session', 'sessions')}`;
 
-// The storage bucket and its keys, typed once. They are kept protected on this computer and no
-// page shows them again.
-function cloudStorage(then) {
-  const s = team.storage;
-  const endpoint = el('input', { type: 'text', id: 'cs-endpoint', class: 'code', autocomplete: 'off', value: s.endpoint || '' });
-  const bucket = el('input', { type: 'text', id: 'cs-bucket', class: 'code', autocomplete: 'off', value: s.bucket || '' });
-  const access = el('input', { type: 'password', id: 'cs-access', class: 'code', autocomplete: 'off' });
-  const secret = el('input', { type: 'password', id: 'cs-secret', class: 'code', autocomplete: 'off' });
-  const from = el('input', { type: 'text', id: 'cs-from', autocomplete: 'off', value: s.as || '' });
+// The fields of a bucket and its keys. The keys are kept protected on this computer and no page
+// shows them again.
+function bucketFields(prefix, s) {
+  const f = {
+    endpoint: el('input', { type: 'text', id: prefix + '-endpoint', class: 'code', autocomplete: 'off', value: s.endpoint || '' }),
+    bucket: el('input', { type: 'text', id: prefix + '-bucket', class: 'code', autocomplete: 'off', value: s.bucket || '' }),
+    access: el('input', { type: 'password', id: prefix + '-access', class: 'code', autocomplete: 'off' }),
+    secret: el('input', { type: 'password', id: prefix + '-secret', class: 'code', autocomplete: 'off' }),
+    from: el('input', { type: 'text', id: prefix + '-from', autocomplete: 'off', value: s.as || '' }),
+  };
+  f.nodes = [
+    field('Storage address', f.endpoint, 'Cloudflare shows it when you create the R2 API token. It ends in r2.cloudflarestorage.com.'),
+    field('Bucket name', f.bucket),
+    field('Access Key ID', f.access),
+    field('Secret Access Key', f.secret, 'Both keys are kept protected on this computer and are never shown again.'),
+    field('Your name', f.from, 'How colleagues see who sent something.'),
+  ];
+  f.values = () => ({ endpoint: f.endpoint.value.trim(), bucket: f.bucket.value.trim(), from: f.from.value.trim(), access_key: f.access.value, secret_key: f.secret.value });
+  return f;
+}
+
+// A storage saved once: the personal one or the shared one.
+function cloudStorage(slot = 'personal', then) {
+  const s = team.storages[slot] || {};
+  const info = STORAGES[slot];
+  const f = bucketFields('cs', s);
   const wrong = alertLine();
-  openDialog(s.set ? 'Change the cloud storage' : 'Set up cloud storage', [
-    el('p', { class: 'quiet small', text: 'A storage bucket in your own account (Cloudflare R2, or another S3-compatible service). Only projects you turn sharing on for are ever sent there, and they are encrypted first.' }),
-    field('Storage address', endpoint, 'Cloudflare shows it when you create the R2 API token. It ends in r2.cloudflarestorage.com.'),
-    field('Bucket name', bucket),
-    field('Access Key ID', access),
-    field('Secret Access Key', secret, 'Both keys are kept protected on this computer and are never shown again.'),
-    field('Your name', from, 'How colleagues see who sent something.'),
+  openDialog(s.saved ? `Change the ${info.title.toLowerCase()}` : `Set up the ${info.title.toLowerCase()}`, [
+    el('p', { class: 'quiet small', text: `${info.what} A storage bucket in Cloudflare R2 or another S3-compatible service. Only projects you turn sharing on for are ever sent there, and they are encrypted first.` }),
+    ...f.nodes,
     wrong,
   ], [
     btn('Cancel', 'btn', () => dialog.close()),
     btn('Save storage', 'btn primary', async () => {
-      const r = await api('POST', '/api/team/storage', { endpoint: endpoint.value.trim(), bucket: bucket.value.trim(), from: from.value.trim(), access_key: access.value, secret_key: secret.value });
+      const r = await api('POST', '/api/team/storage', { storage: slot, ...f.values() });
       if (!r.ok) { wrong.textContent = problem(r); return; }
       await loadTeam();
       dialog.close();
-      say('The bucket answered and the storage is saved. Nothing was sent.', 'ok');
+      say(`The bucket answered and the ${info.title.toLowerCase()} is saved. Nothing was sent.`, 'ok');
       return then ? then() : reload();
     }),
   ]);
 }
 
-function forgetStorage() {
-  openDialog('Forget the cloud storage?', [
-    el('p', { text: 'This computer forgets the bucket and its keys. Projects already shared keep working until you stop sharing them. Nothing in the bucket is touched.' }),
+function forgetStorage(slot = 'personal') {
+  const name = STORAGES[slot].title.toLowerCase();
+  openDialog(`Forget the ${name}?`, [
+    el('p', { text: 'This computer forgets the bucket and its keys. Projects already shared through it keep working until you stop sharing them. Nothing in the bucket is touched.' }),
   ], [
     btn('Keep it', 'btn', () => dialog.close()),
     btn('Forget storage', 'btn danger', async () => {
-      const r = await api('POST', '/api/team/storage', { forget: true });
+      const r = await api('POST', '/api/team/storage', { forget: true, storage: slot });
       dialog.close();
       if (!r.ok) return say(problem(r), 'bad');
       await loadTeam();
       await reload();
-      say('The cloud storage is forgotten.', 'ok');
+      say(`The ${name} is forgotten.`, 'ok');
     }),
   ]);
 }
 
-// Turning sharing on for one project: a shared name and a passphrase, nothing else.
+// Turning sharing on for one project: where it is kept (the personal storage unless another is
+// chosen), a shared name and a passphrase.
 function shareProject(p) {
-  if (!team.storage.set) return cloudStorage(() => shareProject(p));
+  const st = team.storages;
+  // Someone sharing for the first time sets up their own bucket first.
+  if (!st.personal.set && !st.shared.set) return cloudStorage('personal', () => shareProject(p));
   const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  const notYet = 'Not set up yet: set it up under Settings first.';
+  const where = choice('sh-store', 'Where it is kept', [
+    ['personal', 'Personal storage', st.personal.set ? `Your own bucket ${st.personal.bucket}.` : notYet, !st.personal.set],
+    ['shared', 'Shared storage', st.shared.set ? `The bucket ${st.shared.bucket} you share with others.` : notYet, !st.shared.set],
+    ['custom', 'A bucket of its own', 'Another bucket for this project only, such as one a client or another team gave you.'],
+  ], st.personal.set ? 'personal' : 'shared');
+  const own = bucketFields('sc', { as: st.personal.as || st.shared.as });
+  const ownBox = el('div', { class: 'subfields' }, own.nodes);
+  const paint = () => { ownBox.hidden = where.value() !== 'custom'; };
+  where.addEventListener('change', paint);
+  paint();
   const shared = el('input', { type: 'text', id: 'sh-name', class: 'code', autocomplete: 'off', value: slug });
   const pass = el('input', { type: 'password', id: 'sh-pass', autocomplete: 'new-password' });
   const wrong = alertLine();
   openDialog(`Share ${p.name} through the cloud?`, [
-    el('p', { text: `Its instructions, checkpoints and conversations can then be sent, encrypted, to the bucket ${team.storage.bucket}, and colleagues who share the same project can receive them. Nothing is sent until you press Sync now.` }),
+    el('p', { text: 'Its instructions, checkpoints and conversations can then be sent, encrypted, to the bucket you choose, and colleagues who share the same project can receive them. Nothing is sent until you press Sync now.' }),
+    where,
+    ownBox,
     field('Shared project name', shared, 'Colleagues must type exactly the same name. Lower-case letters, digits and dashes.'),
     field('Passphrase for this project', pass, `At least ${team.min_passphrase || 12} characters. Make one up if you are the first to share this project; otherwise type the one your colleague gave you. Keep it somewhere safe: it is never shown again, and anyone who has it and can reach the bucket can read what is sent.`),
     wrong,
   ], [
     btn('Cancel', 'btn', () => dialog.close()),
     btn('Turn sharing on', 'btn primary', async () => {
-      const r = await api('POST', '/api/team/connect', { project: p.id, name: shared.value.trim(), passphrase: pass.value });
+      const storage = where.value();
+      const body = { project: p.id, name: shared.value.trim(), passphrase: pass.value, storage };
+      if (storage === 'custom') Object.assign(body, own.values());
+      const r = await api('POST', '/api/team/connect', body);
       if (!r.ok) { wrong.textContent = problem(r); return; }
       await loadTeam();
       dialog.close();
@@ -1030,7 +1071,7 @@ async function projectsView(sel) {
       recall,
       el('div', { class: 'row' }, btn('Change how Claude gets them', 'btn', () => act(`/api/projects/${p.id}/recall`, { mode: recall.value() }, 'Changed. It applies from the next request.'))),
       shared ? el('div', { class: 'row' }, btn('Sync now', 'btn primary', () => teamSync(p), `Receive and send the work on ${p.name}`), btn('Stop sharing', 'btn', () => stopSharing(p), `Stop sharing ${p.name}`),
-        el('span', { class: 'quiet small', text: `Shared through the cloud as "${shared.name}" in the bucket ${shared.bucket}. Sync shows what would be received and sent first.` }))
+        el('span', { class: 'quiet small', text: `Shared through the cloud as "${shared.name}" in the bucket ${shared.bucket} (${placeOf(shared)}). Sync shows what would be received and sent first.` }))
         : el('div', { class: 'row' }, btn('Share through the cloud', 'btn', () => shareProject(p), `Share ${p.name} through the cloud`),
           el('span', { class: 'quiet small', text: 'Not shared: this project stays on this computer. Turn this on only for a project you work on with others.' })),
       el('div', { class: 'row' }, btn('Sync with Claude Code', 'btn', () => sync(p), `Bring in sessions of ${p.name} that are not saved yet`),
@@ -1126,13 +1167,24 @@ async function settingsView() {
   loadAccounts();
 
   await loadTeam();
-  const cs = team.storage;
+  const used = slot => Object.values(team.projects).filter(x => x.storage === slot).length;
+  const own = Object.values(team.projects).filter(x => x.storage === 'custom').length;
+  const storageBlock = slot => {
+    const s = team.storages[slot];
+    const info = STORAGES[slot];
+    return el('div', { class: 'subfields' },
+      el('h3', { text: info.title }),
+      el('p', { class: 'quiet small', text: info.what }),
+      s.set ? el('p', { text: `Bucket ${s.bucket} at ${s.endpoint}.` + (s.as ? ` Colleagues see you as "${s.as}".` : '') + ` ${plural(used(slot), 'project is', 'projects are')} shared through it.` + (s.saved ? '' : ' Taken from a project connected earlier.') })
+        : el('p', { class: 'quiet', text: 'Not set up.' }),
+      el('div', { class: 'row' }, btn(s.saved ? 'Change' : 'Set up', 'btn', () => cloudStorage(slot), `${s.saved ? 'Change' : 'Set up'} the ${info.title.toLowerCase()}`),
+        s.saved ? btn('Forget', 'btn', () => forgetStorage(slot), `Forget the ${info.title.toLowerCase()}`) : null));
+  };
   stack.append(card('Cloud storage for shared projects',
-    el('p', { class: 'quiet small', text: 'Projects stay on this computer unless you turn sharing on for them, one by one, on the Projects page. Shared projects are sent, encrypted, to this bucket when you press Sync now.' }),
-    cs.set ? el('p', { text: `Bucket ${cs.bucket} at ${cs.endpoint}.` + (cs.as ? ` Colleagues see you as "${cs.as}".` : '') + ` ${plural(Object.keys(team.projects).length, 'project is', 'projects are')} shared.` })
-      : el('p', { class: 'quiet', text: 'No storage is set up, so nothing can be shared.' }),
-    el('div', { class: 'row' }, btn(cs.set ? 'Change storage' : 'Set up cloud storage', 'btn', () => cloudStorage()),
-      cs.saved ? btn('Forget storage', 'btn', () => forgetStorage()) : null)));
+    el('p', { class: 'quiet small', text: 'Projects stay on this computer unless you turn sharing on for them, one by one, on the Projects page. A shared project goes to your personal storage unless you choose the shared storage or a bucket of its own; it is sent, encrypted, only when you press Sync now.' }),
+    storageBlock('personal'),
+    storageBlock('shared'),
+    own ? el('p', { class: 'quiet small', text: `${plural(own, 'project uses', 'projects use')} a bucket of its own; it is kept with that project, not here.` }) : null));
 
   if (sm.ok) {
     const d = sm.data;

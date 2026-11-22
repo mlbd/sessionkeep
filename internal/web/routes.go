@@ -348,6 +348,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/team/overview", func(w http.ResponseWriter, r *http.Request) { s.command(w, "team", "list") })
 	mux.HandleFunc("POST /api/team/storage", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
+			Storage   string `json:"storage"` // personal (when empty) or shared
 			Endpoint  string `json:"endpoint"`
 			Bucket    string `json:"bucket"`
 			From      string `json:"from"`
@@ -358,24 +359,54 @@ func (s *Server) routes(mux *http.ServeMux) {
 		if !decode(w, r, &in) {
 			return
 		}
+		slot := in.Storage
+		if slot == "" {
+			slot = "personal"
+		}
 		if in.Forget {
-			s.command(w, "team", "storage-forget", "--yes")
+			s.command(w, "team", "storage-forget", flag("storage", slot), "--yes")
 			return
 		}
 		secrets, _ := json.Marshal(map[string]string{"access_key": in.AccessKey, "secret_key": in.SecretKey})
-		s.commandIn(w, secrets, "team", "storage", "--secrets-stdin", flag("endpoint", in.Endpoint), flag("bucket", in.Bucket), flag("from", in.From))
+		s.commandIn(w, secrets, "team", "storage", "--secrets-stdin", flag("storage", slot), flag("endpoint", in.Endpoint), flag("bucket", in.Bucket), flag("from", in.From))
 	})
 	mux.HandleFunc("POST /api/team/connect", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Project    string `json:"project"`
 			Name       string `json:"name"`
 			Passphrase string `json:"passphrase"`
+			// personal (when empty) or shared, or custom with a bucket of the project's own.
+			Storage   string `json:"storage"`
+			Endpoint  string `json:"endpoint"`
+			Bucket    string `json:"bucket"`
+			From      string `json:"from"`
+			AccessKey string `json:"access_key"`
+			SecretKey string `json:"secret_key"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
-		secrets, _ := json.Marshal(map[string]string{"passphrase": in.Passphrase})
-		s.commandIn(w, secrets, "team", "connect", "--secrets-stdin", flag("project", in.Project), flag("name", in.Name))
+		args := []string{"team", "connect", "--secrets-stdin", flag("project", in.Project), flag("name", in.Name)}
+		secret := map[string]string{"passphrase": in.Passphrase}
+		switch in.Storage {
+		case "custom":
+			// Without both, the command would fall back to the personal storage.
+			if in.Endpoint == "" || in.Bucket == "" {
+				fail(w, http.StatusBadRequest, "usage", "a bucket of its own needs the storage address and the bucket name")
+				return
+			}
+			secret["access_key"], secret["secret_key"] = in.AccessKey, in.SecretKey
+			args = append(args, flag("endpoint", in.Endpoint), flag("bucket", in.Bucket))
+			if in.From != "" {
+				args = append(args, flag("from", in.From))
+			}
+		case "":
+			args = append(args, flag("storage", "personal"))
+		default:
+			args = append(args, flag("storage", in.Storage))
+		}
+		secrets, _ := json.Marshal(secret)
+		s.commandIn(w, secrets, args...)
 	})
 	mux.HandleFunc("POST /api/team/{action}", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

@@ -22,18 +22,19 @@ import (
 	"sessionkeep/internal/team"
 )
 
-const teamUsage = `usage: sessionkeep team storage --endpoint URL --bucket BUCKET [--region REGION] [--from YOUR-NAME]
-           (saves the bucket once for every project you share; keys from SESSIONKEEP_TEAM_ACCESS_KEY, SESSIONKEEP_TEAM_SECRET_KEY)
-       sessionkeep team connect --name SHARED-NAME [--endpoint URL --bucket BUCKET] [--region REGION] [--from YOUR-NAME] [--project ID_OR_PATH]
-           (without --endpoint and --bucket the saved storage is used; the passphrase is read from SESSIONKEEP_TEAM_PASSPHRASE.
-            Keys and passphrases are never taken from the command line)
+const teamUsage = `usage: sessionkeep team storage [--storage personal|shared] --endpoint URL --bucket BUCKET [--region REGION] [--from YOUR-NAME]
+           (saves a bucket once: "personal" is your own and the default, "shared" one you share with others;
+            keys from SESSIONKEEP_TEAM_ACCESS_KEY, SESSIONKEEP_TEAM_SECRET_KEY)
+       sessionkeep team connect --name SHARED-NAME [--storage personal|shared | --endpoint URL --bucket BUCKET] [--region REGION] [--from YOUR-NAME] [--project ID_OR_PATH]
+           (uses the personal storage unless --storage shared or a bucket of its own (--endpoint, --bucket) is given;
+            the passphrase is read from SESSIONKEEP_TEAM_PASSPHRASE. Keys and passphrases are never taken from the command line)
        sessionkeep team list
        sessionkeep team status [--project ID_OR_PATH]
        sessionkeep team sync [--project ID_OR_PATH] [--yes]      receive, then send
        sessionkeep team push [--project ID_OR_PATH] [--no-sessions] [--yes]
        sessionkeep team pull [--project ID_OR_PATH] [--yes]
        sessionkeep team disconnect [--project ID_OR_PATH] [--yes]
-       sessionkeep team storage-forget [--yes]`
+       sessionkeep team storage-forget [--storage personal|shared] [--yes]`
 
 // Environment variables that carry secrets into `team connect`.
 const (
@@ -69,17 +70,17 @@ func teamCmd(inv invocation, rest []string) error {
 	}
 	switch rest[0] {
 	case "connect":
-		if err := inv.only("name", "endpoint", "bucket", "region", "from", "project", "secrets-stdin"); err != nil {
+		if err := inv.only("name", "storage", "endpoint", "bucket", "region", "from", "project", "secrets-stdin"); err != nil {
 			return err
 		}
 		return teamConnect(inv)
 	case "storage":
-		if err := inv.only("endpoint", "bucket", "region", "from", "secrets-stdin"); err != nil {
+		if err := inv.only("storage", "endpoint", "bucket", "region", "from", "secrets-stdin"); err != nil {
 			return err
 		}
 		return teamStorage(inv)
 	case "storage-forget":
-		if err := inv.only("yes"); err != nil {
+		if err := inv.only("storage", "yes"); err != nil {
 			return err
 		}
 		return teamStorageForget(inv)
@@ -172,6 +173,18 @@ func teamPlace(inv invocation) (endpoint, bucket, region string, err error) {
 	return endpoint, bucket, region, nil
 }
 
+// teamSlot reads --storage: personal (the default) or shared.
+func teamSlot(inv invocation) (string, error) {
+	slot := inv.flags["storage"]
+	if slot == "" {
+		return team.Personal, nil
+	}
+	if err := team.CheckSlot(slot); err != nil {
+		return "", usageErr("%v", err)
+	}
+	return slot, nil
+}
+
 func keysGuard() string {
 	if keep.Protected {
 		return "They are stored protected for your Windows user on this computer."
@@ -179,11 +192,15 @@ func keysGuard() string {
 	return "They are stored in a file only you can read; this system has no stronger protection built in yet."
 }
 
-// teamStorage saves the bucket and its keys once, for every project shared from this computer.
-// It reads the bucket's listing to prove the keys work; nothing is written there.
+// teamStorage saves a bucket and its keys once, as the personal or the shared storage of this
+// computer. It reads the bucket's listing to prove the keys work; nothing is written there.
 func teamStorage(inv invocation) error {
 	if inv.flags["bucket"] == "" || inv.flags["endpoint"] == "" {
 		return usageErr("%s", teamUsage)
+	}
+	slot, err := teamSlot(inv)
+	if err != nil {
+		return err
 	}
 	endpoint, bucket, region, err := teamPlace(inv)
 	if err != nil {
@@ -206,31 +223,39 @@ func teamStorage(inv invocation) error {
 	if _, err := teamClient(team.Connection{Endpoint: endpoint, Bucket: bucket, Region: region}, sec).List(ctx, "sessionkeep/v1/"); err != nil {
 		return teamErr(err)
 	}
-	if err := team.PutStorage(st.paths, s, sec); err != nil {
+	if err := team.PutStorage(st.paths, slot, s, sec); err != nil {
 		return err
 	}
-	return inv.emit(map[string]any{"saved": true, "endpoint": endpoint, "bucket": bucket, "as": s.As, "keys_protected_by_os": keep.Protected},
-		fmt.Sprintf("The bucket %s answered with these keys, and they are saved. %s\nNothing was sent. Share a project with `sessionkeep team connect --name SHARED-NAME`.\n", bucket, keysGuard()))
+	how := "`sessionkeep team connect --name SHARED-NAME`"
+	if slot == team.Shared {
+		how = "`sessionkeep team connect --name SHARED-NAME --storage shared`"
+	}
+	return inv.emit(map[string]any{"saved": true, "storage": slot, "endpoint": endpoint, "bucket": bucket, "as": s.As, "keys_protected_by_os": keep.Protected},
+		fmt.Sprintf("The bucket %s answered with these keys, and it is saved as your %s storage. %s\nNothing was sent. Share a project through it with %s.\n", bucket, slot, keysGuard(), how))
 }
 
 func teamStorageForget(inv invocation) error {
+	slot, err := teamSlot(inv)
+	if err != nil {
+		return err
+	}
 	st, err := load(inv, true)
 	if err != nil {
 		return err
 	}
 	const stays = "Projects already shared keep working with their own copy of the keys until you stop sharing them. Nothing in the bucket is touched.\n"
 	if inv.flags["yes"] == "" {
-		inv.emit(map[string]any{"forgotten": false}, "NOT FORGOTTEN YET. This would remove the saved storage and its keys from this computer.\n"+stays+"Run the same command with --yes.\n")
+		inv.emit(map[string]any{"forgotten": false, "storage": slot}, fmt.Sprintf("NOT FORGOTTEN YET. This would remove the %s storage and its keys from this computer.\n", slot)+stays+"Run the same command with --yes.\n")
 		return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was changed; add --yes to confirm"}
 	}
-	if err := team.RemoveStorage(st.paths); err != nil {
+	if err := team.RemoveStorage(st.paths, slot); err != nil {
 		return err
 	}
-	return inv.emit(map[string]any{"forgotten": true}, "The saved storage is forgotten. "+stays)
+	return inv.emit(map[string]any{"forgotten": true, "storage": slot}, fmt.Sprintf("The %s storage is forgotten. ", slot)+stays)
 }
 
-// teamList says, without contacting the storage, which storage is saved and which projects are
-// shared through it. It never shows a key or a passphrase.
+// teamList says, without contacting any storage, which storages are saved and which projects are
+// shared, and through which storage. It never shows a key or a passphrase.
 func teamList(inv invocation) error {
 	st, err := load(inv, true)
 	if err != nil {
@@ -240,18 +265,25 @@ func teamList(inv invocation) error {
 	if err != nil {
 		return failErr("team_settings", "%v", err)
 	}
-	s, _, ok, saved, keyErr := team.GetStorage(st.paths)
-	storage := map[string]any{"set": ok, "saved": saved, "endpoint": s.Endpoint, "bucket": s.Bucket, "as": s.As, "keys_readable": keyErr == nil}
-	shared := map[string]any{}
-	var b strings.Builder
-	switch {
-	case !ok:
-		b.WriteString("No cloud storage is saved on this computer.\n")
-	case saved:
-		fmt.Fprintf(&b, "Cloud storage: bucket %s at %s.\n", s.Bucket, s.Endpoint)
-	default:
-		fmt.Fprintf(&b, "Cloud storage: bucket %s at %s (taken from a project connected earlier).\n", s.Bucket, s.Endpoint)
+	saved, err := team.Storages(st.paths)
+	if err != nil {
+		return failErr("team_settings", "%v", err)
 	}
+	var b strings.Builder
+	storages := map[string]any{}
+	for _, slot := range []string{team.Personal, team.Shared} {
+		s, _, ok, isSaved, keyErr := team.GetStorage(st.paths, slot)
+		storages[slot] = map[string]any{"set": ok, "saved": isSaved, "endpoint": s.Endpoint, "bucket": s.Bucket, "as": s.As, "keys_readable": keyErr == nil}
+		switch {
+		case !ok:
+			fmt.Fprintf(&b, "%-9s storage: not set up.\n", slot)
+		case isSaved:
+			fmt.Fprintf(&b, "%-9s storage: bucket %s at %s.\n", slot, s.Bucket, s.Endpoint)
+		default:
+			fmt.Fprintf(&b, "%-9s storage: bucket %s at %s (taken from a project connected earlier).\n", slot, s.Bucket, s.Endpoint)
+		}
+	}
+	shared := map[string]any{}
 	ids := make([]string, 0, len(conns))
 	for id := range conns {
 		ids = append(ids, id)
@@ -259,13 +291,15 @@ func teamList(inv invocation) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		c := conns[id]
-		shared[id] = map[string]any{"name": c.Name, "bucket": c.Bucket, "endpoint": c.Endpoint, "as": c.As, "connected_at": c.ConnectedAt}
-		fmt.Fprintf(&b, "  project %s is shared as %q in bucket %s (since %.10s)\n", id, c.Name, c.Bucket, c.ConnectedAt)
+		slot := team.SlotOf(saved, c)
+		shared[id] = map[string]any{"name": c.Name, "storage": slot, "bucket": c.Bucket, "endpoint": c.Endpoint, "as": c.As, "connected_at": c.ConnectedAt}
+		fmt.Fprintf(&b, "  project %s is shared as %q in bucket %s (%s storage, since %.10s)\n", id, c.Name, c.Bucket, slot, c.ConnectedAt)
 	}
 	if len(ids) == 0 {
 		b.WriteString("No project is shared. Projects stay on this computer until you connect them.\n")
 	}
-	return inv.emit(map[string]any{"storage": storage, "projects": shared, "keys_protected_by_os": keep.Protected, "min_passphrase": team.MinPassphrase}, b.String())
+	// "storage" is the personal storage, as answered before there were two.
+	return inv.emit(map[string]any{"storage": storages[team.Personal], "storages": storages, "projects": shared, "keys_protected_by_os": keep.Protected, "min_passphrase": team.MinPassphrase}, b.String())
 }
 
 func teamConnect(inv invocation) error {
@@ -273,8 +307,15 @@ func teamConnect(inv invocation) error {
 	if name == "" || (inv.flags["bucket"] == "") != (inv.flags["endpoint"] == "") {
 		return usageErr("%s", teamUsage)
 	}
+	if inv.flags["storage"] != "" && inv.flags["endpoint"] != "" {
+		return usageErr("give either --storage or a bucket of its own (--endpoint and --bucket), not both")
+	}
 	if err := team.CheckName(name); err != nil {
 		return usageErr("%v", err)
+	}
+	slot, err := teamSlot(inv)
+	if err != nil {
+		return err
 	}
 	sec, err := teamSecrets(inv)
 	if err != nil {
@@ -287,20 +328,27 @@ func teamConnect(inv invocation) error {
 	var endpoint, bucket, region string
 	as := strings.TrimSpace(inv.flags["from"])
 	if inv.flags["endpoint"] != "" {
+		// A bucket of the project's own, kept only in its connection.
+		slot = team.Custom
 		if endpoint, bucket, region, err = teamPlace(inv); err != nil {
 			return err
 		}
 		if sec.AccessKey == "" || sec.SecretKey == "" {
-			return &cmdError{ExitNeedsConsent, "keys_required", fmt.Sprintf("set %s, %s and %s in the environment for this one command; they are stored protected afterwards and are never taken from the command line", envTeamAccess, envTeamSecret, envTeamPassphrase)}
+			return &cmdError{ExitNeedsConsent, "keys_required", fmt.Sprintf("the storage keys for this bucket are needed: set %s, %s and %s in the environment for this one command; they are stored protected afterwards and are never taken from the command line", envTeamAccess, envTeamSecret, envTeamPassphrase)}
+		}
+		if as == "" {
+			if s, _, ok, _, _ := team.GetStorage(st.paths, team.Personal); ok {
+				as = s.As
+			}
 		}
 	} else {
-		// The storage saved once on this computer, with its keys.
-		s, keys, ok, _, err := team.GetStorage(st.paths)
+		// A storage saved once on this computer, with its keys.
+		s, keys, ok, _, err := team.GetStorage(st.paths, slot)
 		if err != nil {
 			return failErr("team_settings", "%v", err)
 		}
 		if !ok {
-			return failErr("storage_required", "no cloud storage is saved on this computer yet; save it first (in the dashboard under Settings, or with `sessionkeep team storage`)")
+			return failErr("storage_required", "no %s storage is saved on this computer yet; save it first (in the dashboard under Settings, or with `sessionkeep team storage --storage %s`), or give this project a bucket of its own", slot, slot)
 		}
 		if len(as) > 100 {
 			return usageErr("--from is a short name, at most 100 characters")
@@ -353,8 +401,8 @@ func teamConnect(inv invocation) error {
 	if err := team.Put(st.paths, conn, sec); err != nil {
 		return err
 	}
-	return inv.emit(map[string]any{"connected": true, "project_id": proj.ID, "name": name, "endpoint": endpoint, "bucket": bucket, "bundles_there": len(there), "keys_protected_by_os": keep.Protected},
-		fmt.Sprintf("project %q is connected to bucket %s as %q; %d bundle(s) are there already.\nThe keys and the passphrase are kept on this computer. %s\nNothing was sent. Receive and send with `sessionkeep team sync`.\n", proj.Name, bucket, name, len(there), keysGuard()))
+	return inv.emit(map[string]any{"connected": true, "project_id": proj.ID, "name": name, "storage": slot, "endpoint": endpoint, "bucket": bucket, "bundles_there": len(there), "keys_protected_by_os": keep.Protected},
+		fmt.Sprintf("project %q is connected to bucket %s (%s storage) as %q; %d bundle(s) are there already.\nThe keys and the passphrase are kept on this computer. %s\nNothing was sent. Receive and send with `sessionkeep team sync`.\n", proj.Name, bucket, slot, name, len(there), keysGuard()))
 }
 
 // teamNew gathers what this computer has not sent yet.
