@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SessionKeep dashboard: redesign mockup</title>
+<!--
+  A clickable mockup of a simpler SessionKeep dashboard. Sample data only; it is not connected
+  to the program and nothing here changes anything. Two levels:
+    1. Everything (no project chosen): the project list and what applies to every project.
+    2. Inside a project: its own menu on the left, and every page there is about that project only.
+-->
+<style>
+  :root {
+    --bg: #f4f3ef; --surface: #ffffff; --ink: #1d2320; --muted: #66706b; --line: #e3e1da; --line2: #d4d1c8;
+    --accent: #1f6f5c; --accent-soft: #e4f1ec; --accent-ink: #ffffff;
+    --all: #2f5f9e; --all-soft: #e6eef9; --proj: #1f6f5c; --proj-soft: #e4f1ec;
+    --warn: #9a6400; --warn-soft: #fbf0d9; --bad: #a33a2b; --bad-soft: #f9e5e1; --ok: #2a7a4b; --ok-soft: #e3f3e8;
+    --side: #ebe9e3; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  a { color: inherit; }
+  button { font: inherit; cursor: pointer; }
+  .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+
+  /* Sidebar */
+  .side { background: var(--side); border-right: 1px solid var(--line); padding: 18px 12px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 6px; font-weight: 700; font-size: 15px; }
+  .brand i { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); display: inline-block; }
+  .side h3 { margin: 6px 8px 2px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; text-decoration: none; color: #2d3530; }
+  .nav a:hover { background: rgba(0,0,0,.05); }
+  .nav a.on { background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.06); font-weight: 600; }
+  .nav a .n { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .nav svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; opacity: .8; }
+  .back { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; text-decoration: none; color: var(--muted); font-size: 13px; }
+  .back:hover { background: rgba(0,0,0,.05); color: var(--ink); }
+  .projhead { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .projhead b { display: block; font-size: 15px; }
+  .projhead .path { font: 11.5px var(--mono); color: var(--muted); word-break: break-all; }
+  .projhead .row { margin-top: 8px; }
+  .sidefoot { margin-top: auto; font-size: 12px; color: var(--muted); padding: 0 8px; }
+
+  /* Main */
+  main { padding: 26px 34px 60px; max-width: 1080px; }
+  .crumb { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+  .crumb a { text-decoration: none; } .crumb a:hover { text-decoration: underline; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: -.01em; }
+  .lede { margin: 0; color: var(--muted); max-width: 640px; }
+  .scope { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
+  .scope.all { background: var(--all-soft); color: var(--all); }
+  .scope.proj { background: var(--proj-soft); color: var(--proj); }
+  .scope svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .card + .card, .stack > * + * { margin-top: 14px; }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card h4 { margin: 14px 0 6px; font-size: 13px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 2px 0 10px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid2 > .card, .grid3 > .card { margin-top: 0; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .between { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .muted { color: var(--muted); } .small { font-size: 12.5px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  .btn { background: var(--surface); border: 1px solid var(--line2); border-radius: 9px; padding: 7px 13px; font-size: 13px; color: var(--ink); }
+  .btn:hover { border-color: #b9b5aa; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn.danger { color: var(--bad); border-color: #e2b8b0; }
+  .btn.link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; }
+
+  .pill { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px; display: inline-block; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); } .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); } .pill.grey { background: #ecebe6; color: var(--muted); }
+  .pill.share { background: var(--all-soft); color: var(--all); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: #faf9f6; }
+  tr:last-child td { border-bottom: 0; }
+
+  label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; font-weight: 600; margin-top: 12px; }
+  input[type=text], input[type=password], select, textarea { font: inherit; font-weight: 400; padding: 8px 10px; border: 1px solid var(--line2); border-radius: 9px; background: #fff; width: 100%; }
+  textarea { min-height: 70px; resize: vertical; }
+  .tiles { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .tile { display: grid; grid-template-columns: auto 1fr; gap: 0 10px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; font-weight: 400; margin: 0; cursor: pointer; }
+  .tile b { font-size: 13px; } .tile span { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .tile:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .tile:has(input:disabled) { opacity: .5; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 9px; overflow: hidden; background: #fff; }
+  .seg button { border: 0; background: none; padding: 6px 12px; font-size: 12.5px; color: var(--muted); }
+  .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .reveal { display: flex; gap: 8px; } .reveal input { flex: 1; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+  .switch i { width: 34px; height: 20px; border-radius: 99px; background: #cfccc3; position: relative; display: inline-block; }
+  .switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .switch.on i { background: var(--accent); } .switch.on i::after { left: 17px; }
+
+  .note { background: var(--all-soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #24456f; }
+  .warnbox { background: var(--warn-soft); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #6b4600; }
+  .stat b { display: block; font-size: 22px; } .stat span { color: var(--muted); font-size: 12.5px; }
+  .parts { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; font-size: 13.5px; margin-top: 8px; }
+  .parts dt { color: var(--muted); font-weight: 600; } .parts dd { margin: 0; }
+  .turn { padding: 10px 12px; border-radius: 10px; background: #faf9f6; border: 1px solid var(--line); margin-top: 8px; font-size: 13.5px; }
+  .turn b { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); display: block; margin-bottom: 2px; }
+  .quote { font-family: var(--mono); font-size: 13px; background: #f6f5f1; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .danger-zone { border-color: #ecc9c2; }
+  .demo { position: fixed; right: 14px; bottom: 14px; background: #1d2320; color: #fff; font-size: 12px; padding: 8px 12px; border-radius: 10px; opacity: .85; }
+  .tabsline { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+  .tabsline button { border: 0; background: none; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tabsline button.on { color: var(--ink); font-weight: 600; border-color: var(--accent); }
+  .empty { text-align: center; padding: 30px; color: var(--muted); }
+
+  /* ---- Theme: cool canvas, graphite sidebar, Bahnschrift for headings and figures ---- */
+  :root {
+    --bg: #f3f5f8; --surface: #ffffff; --ink: #141922; --muted: #5d6675; --line: #e1e5eb; --line2: #cfd5de;
+    --accent: #0f7b65; --accent-soft: #e2f2ed; --accent-ink: #ffffff;
+    --all: #2c5ea8; --all-soft: #e5edf9; --proj: #0f7b65; --proj-soft: #e2f2ed;
+    --warn: #b5761a; --warn-soft: #fbf1df; --ok: #1f7a4d; --ok-soft: #e2f3e9;
+    --side: #141920; --side-ink: #c4cad4; --side-mute: #7b8492; --side-on: #222a35;
+    --display: Bahnschrift, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+  h1, h2, .figure { font-family: var(--display); font-weight: 600; letter-spacing: 0; }
+  h1 { font-size: 26px; }
+  .card { border-radius: 12px; box-shadow: none; }
+
+  .side { background: var(--side); border-right: 0; color: var(--side-ink); }
+  .brand { color: #fff; }
+  .brand i { background: linear-gradient(135deg, #12a383, #0f7b65); }
+  .side h3 { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--side-mute); font-weight: 500; }
+  .nav a { color: var(--side-ink); position: relative; }
+  .nav a:hover { background: rgba(255,255,255,.05); color: #fff; }
+  .nav a.on { background: var(--side-on); color: #fff; box-shadow: none; }
+  .nav a.on::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: #12a383; }
+  .nav a .n { color: var(--side-mute); }
+  .side .pill.ok { background: rgba(18,163,131,.16); color: #5fd3b4; }
+  .side .pill.warn { background: rgba(229,166,60,.16); color: #f0bf6a; }
+  .side .pill.grey { background: rgba(255,255,255,.08); color: var(--side-mute); }
+  .side .pill.share { background: rgba(80,140,230,.18); color: #93b8f0; }
+  .back { color: var(--side-mute); } .back:hover { background: rgba(255,255,255,.05); color: #fff; }
+  .projhead { background: var(--side-on); border-color: #2c3543; color: #fff; }
+  .projhead .path { color: var(--side-mute); }
+  .sidefoot { color: var(--side-mute); }
+
+  th { text-transform: none; letter-spacing: 0; font-size: 12px; }
+  .turn b { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; }
+  .demo { background: var(--side); }
+
+  /* ---- Overview ---- */
+  .status-line { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: -6px 0 18px; font-size: 13px; color: var(--muted); }
+  .status-line span { display: inline-flex; align-items: center; gap: 7px; }
+  .status-line b { color: var(--ink); font-family: var(--display); font-weight: 600; font-size: 14px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+  .dot.live { background: #12a383; box-shadow: 0 0 0 4px rgba(18,163,131,.18); }
+
+  .continue { display: grid; grid-template-columns: 1fr auto; gap: 18px 28px; align-items: end; padding: 24px 26px; border-radius: 16px;
+    background: linear-gradient(120deg, #10261f 0%, #123a30 55%, #0f4a3b 100%); color: #e9f4f0; border: 0; }
+  .continue .where { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #a9cfc3; }
+  .continue .where b { color: #fff; font-weight: 600; }
+  .continue h2 { font-size: 28px; line-height: 1.15; margin: 10px 0 14px; color: #fff; max-width: 22ch; }
+  .continue .steps { display: flex; flex-wrap: wrap; gap: 8px 26px; font-size: 13.5px; color: #cfe5de; }
+  .continue .steps em { font-style: normal; color: #8dbdaf; margin-right: 6px; }
+  .continue .acts { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+  .continue .btn { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.18); color: #fff; text-align: center; text-decoration: none; }
+  .continue .btn.primary { background: #fff; border-color: #fff; color: #0f4a3b; }
+
+  .week { margin-top: 14px; }
+  .week .grid { display: grid; grid-template-columns: 150px repeat(7, 1fr); align-items: center; }
+  .week .day { font-size: 12px; color: var(--muted); padding: 0 6px 8px; }
+  .week .day.today { color: var(--accent); font-weight: 600; }
+  .week .name { font-size: 13px; font-weight: 600; padding: 9px 0; border-top: 1px solid var(--line); text-decoration: none; }
+  .week .name:hover { color: var(--accent); }
+  .week .cell { display: flex; gap: 3px; padding: 9px 6px; border-top: 1px solid var(--line); min-height: 38px; align-items: center; }
+  .week .cell.today { background: linear-gradient(var(--accent-soft), var(--accent-soft)) padding-box; }
+  .week .s { height: 16px; border-radius: 4px; background: var(--accent); }
+  .week .s.short { width: 8px; opacity: .55; } .week .s.mid { width: 16px; opacity: .8; } .week .s.long { width: 26px; }
+  .week .s.paused { background: var(--line2); }
+  .week .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); align-items: center; }
+  .week .legend i { display: inline-block; height: 10px; border-radius: 3px; background: var(--accent); margin-right: 6px; vertical-align: -1px; }
+
+  .needs { list-style: none; margin: 8px 0 0; padding: 0; }
+  .needs li { display: grid; grid-template-columns: 4px 1fr auto; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--line); }
+  .needs li:first-child { border-top: 0; }
+  .needs .bar { align-self: stretch; border-radius: 4px; background: var(--warn); }
+  .needs .bar.share { background: var(--all); }
+  .needs p { margin: 0; font-size: 13.5px; } .needs p span { display: block; font-size: 12px; color: var(--muted); }
+
+  .latest { list-style: none; margin: 8px 0 0; padding: 0; }
+  .latest li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .latest li:first-child { border-top: 0; }
+  .latest .t { font-size: 13.5px; font-weight: 500; }
+  .latest .p { font-size: 12px; color: var(--muted); }
+  .latest .w { grid-row: 1 / 3; grid-column: 2; font-size: 12px; color: var(--muted); align-self: center; text-align: right; }
+  .latest .live { color: #0f7b65; font-weight: 600; }
+  .seeall { font-size: 13px; color: var(--accent); font-weight: 600; text-decoration: none; }
+
+  :focus-visible { outline: 2px solid #12a383; outline-offset: 2px; }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; } .side { position: static; height: auto; }
+    .grid2, .grid3 { grid-template-columns: 1fr; } .continue { grid-template-columns: 1fr; }
+    .week .grid { grid-template-columns: 96px repeat(7, 1fr); } main { padding: 20px 16px 60px; }
+  }
+
+  /* ---- Folder picker ---- */
+  dialog.picker { width: min(720px, calc(100% - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 70px rgba(20,25,34,.28); color: var(--ink); }
+  dialog.picker::backdrop { background: rgba(20,25,34,.45); }
+  .pk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .pk-head h2 { margin: 0; font-size: 17px; }
+  .pk-os { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .pk-body { display: grid; grid-template-columns: 170px 1fr; min-height: 340px; }
+  .pk-places { border-right: 1px solid var(--line); padding: 10px 8px; background: #f8f9fb; display: flex; flex-direction: column; gap: 2px; }
+  .pk-places small { padding: 8px 8px 4px; color: var(--muted); font-size: 12px; }
+  .pk-places button { text-align: left; border: 0; background: none; padding: 6px 8px; border-radius: 7px; font-size: 13px; color: var(--ink); }
+  .pk-places button:hover, .pk-places button.on { background: var(--accent-soft); color: var(--accent); }
+  .pk-main { display: flex; flex-direction: column; min-width: 0; }
+  .pk-path { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .pk-path button.crumbbtn { border: 0; background: none; padding: 2px 4px; border-radius: 5px; font: 12.5px var(--mono); color: var(--ink); }
+  .pk-path button.crumbbtn:hover { background: #eef1f5; }
+  .pk-path .sep { color: var(--line2); }
+  .pk-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; max-height: 300px; flex: 1; }
+  .pk-list li button { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 8px 10px; border-radius: 8px; text-align: left; font-size: 13.5px; color: var(--ink); }
+  .pk-list li button:hover { background: #f1f4f7; }
+  .pk-list svg { width: 16px; height: 16px; stroke: var(--muted); fill: none; stroke-width: 1.5; flex: none; }
+  .pk-list .tag { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+  .pk-list .tag.done { background: #eceff3; color: var(--muted); }
+  .pk-empty { padding: 30px; text-align: center; color: var(--muted); font-size: 13px; }
+  .pk-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--line); background: #f8f9fb; border-radius: 0 0 14px 14px; }
+  .pk-foot .chosen { font: 12.5px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 640px) { .pk-body { grid-template-columns: 1fr; } .pk-places { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main id="main"></main>
+</div>
+<div class="demo">Mockup with sample data. Nothing here is saved.</div>
+<dialog class="picker" id="picker" aria-labelledby="pk-title">
+  <div class="pk-head"><h2 id="pk-title">Choose a project folder</h2>
+    <div class="pk-os">Mockup: show it on <div class="seg"><button data-pk-os="windows">Windows</button><button data-pk-os="mac">macOS</button><button data-pk-os="linux">Linux</button></div></div></div>
+  <div class="pk-body">
+    <nav class="pk-places" id="pk-places" aria-label="Places"></nav>
+    <div class="pk-main">
+      <div class="pk-path"><button class="btn" data-pk-up aria-label="Go up one folder">Up</button><span id="pk-path" class="row" style="gap:2px"></span></div>
+      <ul class="pk-list" id="pk-list"></ul>
+    </div>
+  </div>
+  <div class="pk-foot"><span class="chosen">Selected: <span id="pk-chosen"></span></span>
+    <div class="row"><button class="btn" data-pk-cancel>Cancel</button><button class="btn primary" data-pk-pick>Use this folder</button></div></div>
+</dialog>
+
+
+<script>
+// ---- Sample data -----------------------------------------------------------------------------
+const projects = [
+  { id: 'shop-app', name: 'shop-app', path: 'C:\\Code\\shop-app', state: 'saving', level: 'Conversation', last: '25 minutes ago', sessions: 48, shared: { as: 'shop-app', storage: 'Shared storage', bucket: 'company-team' } },
+  { id: 'side-notes', name: 'side-notes', path: 'C:\\Code\\side-notes', state: 'saving', level: 'Conversation', last: 'yesterday', sessions: 17, shared: { as: 'side-notes', storage: 'Personal storage', bucket: 'my-bucket' } },
+  { id: 'client-site', name: 'client-site', path: 'C:\\Clients\\acme\\site', state: 'paused', level: 'Conversation and tool output', last: '6 days ago', sessions: 22, shared: null },
+  { id: 'scratch', name: 'scratch', path: 'C:\\Code\\scratch', state: 'off', level: 'Nothing', last: 'never', sessions: 0, shared: null },
+];
+const STATE = { saving: ['ok', 'Saving'], paused: ['warn', 'Paused'], off: ['grey', 'Not saving'] };
+
+// ---- Icons -----------------------------------------------------------------------------------
+const I = {
+  home: '<svg viewBox="0 0 16 16"><path d="M2.5 7.5L8 3l5.5 4.5V13H2.5z"/></svg>',
+  folder: '<svg viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 011-1h3l1.5 1.5H13a1 1 0 011 1V12a1 1 0 01-1 1H3a1 1 0 01-1-1z"/></svg>',
+  search: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3 3"/></svg>',
+  rules: '<svg viewBox="0 0 16 16"><path d="M3 3h10v10H3zM5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg>',
+  gear: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4"/></svg>',
+  pulse: '<svg viewBox="0 0 16 16"><path d="M1.5 8.5h3l1.5-4 3 8 1.5-4h4"/></svg>',
+  play: '<svg viewBox="0 0 16 16"><path d="M3 2.5h10v11l-5-3-5 3z"/></svg>',
+  cal: '<svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10.5" rx="1.5"/><path d="M2.5 6.5h11M5.5 1.8v2.4M10.5 1.8v2.4"/></svg>',
+  list: '<svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>',
+  globe: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c2 2 2 9 0 11M8 2.5c-2 2-2 9 0 11"/></svg>',
+  cloud: '<svg viewBox="0 0 16 16"><path d="M4.5 12.5h7a3 3 0 00.4-6 4 4 0 00-7.6-.8A3.4 3.4 0 004.5 12.5z"/></svg>',
+  left: '<svg viewBox="0 0 16 16" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7"><path d="M10 3L5 8l5 5"/></svg>',
+};
+const scopeAll = `<span class="scope all">${I.globe}All projects</span>`;
+const scopeProj = p => `<span class="scope proj">${I.folder}Only ${p.name}</span>`;
+
+// ---- Navigation ------------------------------------------------------------------------------
+const GLOBAL_PAGES = [
+  ['overview', 'Overview', I.home],
+  ['projects', 'Projects', I.folder],
+  ['search', 'Search everything', I.search],
+  ['rules', 'Instructions for all', I.rules],
+  ['settings', 'Settings', I.gear],
+  ['health', 'Health', I.pulse],
+];
+const PROJECT_PAGES = [
+  ['overview', 'Overview', I.home],
+  ['resume', 'Pick up work', I.play],
+  ['recap', 'Recap', I.cal],
+  ['sessions', 'Sessions', I.list],
+  ['search', 'Search', I.search],
+  ['rules', 'Instructions', I.rules],
+  ['research', 'Research', I.globe],
+  ['sharing', 'Sharing', I.cloud],
+  ['settings', 'Project settings', I.gear],
+];
+
+function route() {
+  const parts = (location.hash.replace(/^#\/?/, '') || 'overview').split('/');
+  if (parts[0] === 'p') {
+    const p = projects.find(x => x.id === parts[1]) || projects[0];
+    return { p, page: parts[2] || 'overview' };
+  }
+  return { p: null, page: parts[0] };
+}
+
+function sidebar({ p, page }) {
+  const side = document.getElementById('side');
+  if (!p) {
+    side.innerHTML = `
+      <div class="brand"><i></i>SessionKeep</div>
+      <div><h3>Everything</h3>
+        <nav class="nav">${GLOBAL_PAGES.map(([id, label, icon]) =>
+          `<a href="#/${id}" class="${page === id ? 'on' : ''}">${icon}${label}${id === 'projects' ? `<span class="n">${projects.length}</span>` : ''}</a>`).join('')}</nav></div>
+      <div><h3>Your projects</h3>
+        <nav class="nav">${projects.map(x => `<a href="#/p/${x.id}">${I.folder}${x.name}<span class="n"><span class="pill ${STATE[x.state][0]}" style="padding:0 6px">${STATE[x.state][1]}</span></span></a>`).join('')}</nav></div>
+      <div class="sidefoot">Pick a project to see its sessions, instructions and sharing. Everything above applies to all projects.</div>`;
+  } else {
+    side.innerHTML = `
+      <div class="brand"><i></i>SessionKeep</div>
+      <a class="back" href="#/overview">${I.left}Back to all projects</a>
+      <div class="projhead"><b>${p.name}</b><div class="path">${p.path}</div>
+        <div class="row"><span class="pill ${STATE[p.state][0]}">${STATE[p.state][1]}</span>${p.shared ? '<span class="pill share">Shared</span>' : ''}</div></div>
+      <div><h3>This project</h3>
+        <nav class="nav">${PROJECT_PAGES.map(([id, label, icon]) =>
+          `<a href="#/p/${p.id}/${id}" class="${page === id ? 'on' : ''}">${icon}${label}</a>`).join('')}</nav></div>
+      <div class="sidefoot">Every page here is about ${p.name} only.</div>`;
+  }
+}
+
+function header(title, lede, scope, crumbs) {
+  return `<div class="crumb">${crumbs}</div>
+    <div class="head"><div><h1>${title}</h1><p class="lede">${lede}</p></div>${scope}</div>`;
+}
+const crumbAll = label => `<a href="#/overview">SessionKeep</a> / ${label}`;
+const crumbProj = (p, label) => `<a href="#/projects">All projects</a> / <a href="#/p/${p.id}">${p.name}</a> / ${label}`;
+
+// Small interactive bits: segmented buttons, switches, show/hide.
+document.addEventListener('click', e => {
+  const s = e.target.closest('.seg button');
+  if (s) { s.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === s)); }
+  const sw = e.target.closest('.switch');
+  if (sw) sw.classList.toggle('on');
+  const t = e.target.closest('[data-tab]');
+  if (t) {
+    const box = t.closest('[data-tabs]');
+    box.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b === t));
+    box.querySelectorAll('[data-pane]').forEach(x => { x.hidden = x.dataset.pane !== t.dataset.tab; });
+  }
+  const r = e.target.closest('[data-reveal]');
+  if (r) { const i = document.getElementById(r.dataset.reveal); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; r.textContent = show ? 'Hide' : 'Show'; }
+  const row = e.target.closest('tr[data-go]');
+  if (row) location.hash = row.dataset.go;
+  const toggle = e.target.closest('[data-toggle]');
+  if (toggle) { const x = document.getElementById(toggle.dataset.toggle); x.hidden = !x.hidden; }
+});
+document.addEventListener('change', e => {
+  if (e.target.name === 'where') document.getElementById('ownbucket').hidden = e.target.value !== 'own';
+  if (e.target.name === 'newmode') document.getElementById('autolevel').hidden = e.target.value !== 'auto';
+});
+
+const tiles = (name, opts, value) => `<div class="tiles">${opts.map(([v, b, s, dis]) =>
+  `<label class="tile"><input type="radio" name="${name}" value="${v}" ${v === value ? 'checked' : ''} ${dis ? 'disabled' : ''}><b>${b}</b><span>${s}</span></label>`).join('')}</div>`;
+const seg = (opts, on) => `<div class="seg">${opts.map((o, i) => `<button class="${i === on ? 'on' : ''}">${o}</button>`).join('')}</div>`;
+const sw = (on, label) => `<span class="switch ${on ? 'on' : ''}"><i></i>${label}</span>`;
+
+// ---- Pages for all projects ------------------------------------------------------------------
+const G = {
+  overview() {
+    // Sessions per project per day this week, as lengths: s = short, m = mid, l = long.
+    const days = ['Mon 17', 'Tue 18', 'Wed 19', 'Thu 20', 'Fri 21', 'Sat 22', 'Sun 23'];
+    const week = {
+      'shop-app': ['m l', 'l s', 's', 'l m m', 'm', '', 'l s'],
+      'side-notes': ['s', '', 'm', '', 's s', 'm', ''],
+      'client-site': ['l', 'm s', '', '', '', '', ''],
+      'scratch': ['', '', '', '', '', '', ''],
+    };
+    const size = { s: 'short', m: 'mid', l: 'long' };
+    const blocks = (id, d) => (week[id][d] || '').split(' ').filter(Boolean)
+      .map(k => `<i class="s ${size[k]}${projects.find(p => p.id === id).state === 'paused' && d > 1 ? ' paused' : ''}"></i>`).join('');
+    return header('Overview', 'Where your work stands across every project, and what needs you.', scopeAll, crumbAll('Overview')) + `
+      <div class="status-line">
+        <span><span class="dot"></span><b>3 of 4</b> projects saving</span>
+        <span><b>87</b> sessions kept, 9 this week</span>
+        <span><span class="dot"></span>Health: <b>all 6</b> checks working</span>
+      </div>
+
+      <section class="card continue" aria-label="Continue where you stopped">
+        <div>
+          <div class="where"><span class="dot live"></span><span><b>shop-app</b> has a session running, started 25 minutes ago</span></div>
+          <h2>Add the receipt e-mail template</h2>
+          <div class="steps"><span><em>Done</em>Totals round once per order</span><span><em>Next</em>Send the receipt e-mail</span><span><em>Blocking</em>Mail provider key</span></div>
+        </div>
+        <div class="acts">
+          <a class="btn primary" href="#/p/shop-app/resume">Pick up work</a>
+          <a class="btn" href="#/p/shop-app">Open shop-app</a>
+        </div>
+      </section>
+
+      <section class="card week" aria-label="Sessions this week">
+        <div class="between" style="margin-bottom:12px"><h2>This week</h2>
+          <div class="legend"><span><i style="width:8px;opacity:.55"></i>Short session</span><span><i style="width:26px"></i>Long session</span></div></div>
+        <div class="grid">
+          <span></span>${days.map((d, i) => `<span class="day${i === 6 ? ' today' : ''}">${i === 6 ? 'Today' : d}</span>`).join('')}
+          ${projects.map(p => `<a class="name" href="#/p/${p.id}">${p.name}</a>` +
+            days.map((_, d) => `<span class="cell${d === 6 ? ' today' : ''}">${blocks(p.id, d)}</span>`).join('')).join('')}
+        </div>
+      </section>
+
+      <div class="grid2" style="margin-top:14px">
+        <section class="card"><div class="between"><h2>Needs you</h2><span class="small muted">3 things</span></div>
+          <ul class="needs">
+            <li><span class="bar"></span><p>Saving is paused in client-site<span>Paused 6 days ago. Nothing new is kept until you resume.</span></p><a class="btn" href="#/p/client-site/settings">Resume</a></li>
+            <li><span class="bar share"></span><p>Kim sent work for shop-app<span>1 bundle is waiting in the shared storage.</span></p><a class="btn" href="#/p/shop-app/sharing">Sync now</a></li>
+            <li><span class="bar"></span><p>A researched fact may be out of date<span>"Node 22 is the active LTS line" was last checked 3 months ago.</span></p><a class="btn" href="#/p/shop-app/research">Check it</a></li>
+          </ul></section>
+        <section class="card"><div class="between"><h2>Latest sessions</h2><a class="seeall" href="#/search">Search all sessions</a></div>
+          <ul class="latest">
+            <li><span class="t">Add the receipt e-mail template</span><span class="p">shop-app</span><span class="w live">Running</span></li>
+            <li><span class="t">Fix tax rounding in checkout</span><span class="p">shop-app</span><span class="w">Yesterday</span></li>
+            <li><span class="t">Summarise the VAT rules</span><span class="p">side-notes</span><span class="w">Yesterday</span></li>
+            <li><span class="t">Header layout for mobile</span><span class="p">client-site</span><span class="w">6 days ago</span></li>
+          </ul></section>
+      </div>`;
+  },
+  projects() {
+    return header('Projects', 'SessionKeep only saves inside these folders. Click a project to open it.', scopeAll, crumbAll('Projects')) + `
+      <div class="grid3">
+        <div class="card stat"><b>3 of 4</b><span>projects are saving</span></div>
+        <div class="card stat"><b>87</b><span>sessions saved in all</span></div>
+        <div class="card stat"><b>All working</b><span><a href="#/health">Health</a>: 6 of 6 checks</span></div>
+      </div>
+      <div class="card" style="padding:6px 10px; margin-top:14px">
+        <table><thead><tr><th>Project</th><th>Status</th><th>What is saved</th><th>Last session</th><th>Sharing</th><th></th></tr></thead><tbody>
+        ${projects.map(p => `<tr class="click" data-go="#/p/${p.id}">
+          <td><b>${p.name}</b><div class="mono muted">${p.path}</div></td>
+          <td><span class="pill ${STATE[p.state][0]}">${STATE[p.state][1]}</span></td>
+          <td class="small">${p.level}</td><td class="small muted">${p.last}</td>
+          <td>${p.shared ? `<span class="pill share">${p.shared.storage}</span>` : '<span class="small muted">Only this computer</span>'}</td>
+          <td style="text-align:right"><span class="btn link">Open</span></td></tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="grid2" style="margin-top:14px">
+        <div class="card"><h2>Add a project</h2><p class="hint">A folder whose Claude Code sessions should be saved.</p>
+          <label for="addpath">Folder</label><div class="reveal" style="margin-top:5px"><input type="text" id="addpath" placeholder="Type or paste a path, or choose a folder"><button class="btn" data-browse>Choose folder</button></div><p class="small muted" style="margin:6px 0 0">Works on Windows, macOS and Linux.</p>
+          <label>What to save<select><option>Conversation (the usual choice)</option><option>Conversation and tool output</option><option>Activity only</option></select></label>
+          <div class="row" style="margin-top:14px"><button class="btn primary">Add project</button></div></div>
+        <div class="card"><h2>Import earlier sessions</h2><p class="hint">Bring in what you and Claude said before SessionKeep was installed, for the projects above. Claude's private reasoning, tool output and images are never imported.</p>
+          <button class="btn">Check what can be imported</button>
+          <p class="small muted" style="margin-top:10px">Nothing is imported until you confirm.</p></div>
+      </div>`;
+  },
+  search() {
+    return header('Search everything', 'Find anything you or Claude said, in every project at once. To search one project, open it and use its Search.', scopeAll, crumbAll('Search everything')) + `
+      <div class="card"><div class="row"><input type="text" value="tax rounding" style="flex:1"><button class="btn primary">Search</button></div>
+        <div class="row" style="margin-top:10px"><span class="small muted">Who said it</span>${seg(['Anyone', 'Me', 'Claude', 'A tool'], 0)}</div></div>
+      <div class="card"><div class="small muted">3 results in 2 projects</div>
+        <div class="turn"><b>shop-app · You · 2 days ago</b>Why is the <mark>tax</mark> total off by one cent? Check the <mark>rounding</mark> in checkout.</div>
+        <div class="turn"><b>shop-app · Claude · 2 days ago</b>The <mark>rounding</mark> happens per line; summing first and rounding once fixes it.</div>
+        <div class="turn"><b>side-notes · You · last week</b>Note: banker's <mark>rounding</mark> for <mark>tax</mark> reports.</div></div>`;
+  },
+  rules() {
+    return header('Instructions for all projects', 'Claude receives these word for word at the start of every session, in every project. Instructions for one project are kept inside that project.', scopeAll, crumbAll('Instructions for all')) + `
+      <div class="card" data-tabs>
+        <div class="tabsline"><button data-tab="a" class="on">In use (2)</button><button data-tab="b">Retired (1)</button></div>
+        <div data-pane="a">
+          <div class="turn"><b>Since 12 Nov</b>Answer in British English.<div class="row" style="margin-top:8px"><button class="btn">Change the wording</button><button class="btn">Retire</button></div></div>
+          <div class="turn"><b>Since 3 Nov</b>Never commit or push unless I ask.<div class="row" style="margin-top:8px"><button class="btn">Change the wording</button><button class="btn">Retire</button></div></div>
+        </div>
+        <div data-pane="b" hidden><div class="turn"><b>Retired 10 Nov</b>Use tabs for indentation.</div></div>
+      </div>
+      <div class="card"><h2>Add an instruction for all projects</h2>
+        <label>Instruction<textarea placeholder="Something Claude should always do or never do"></textarea></label>
+        <div class="row" style="margin-top:12px"><button class="btn primary">Add</button><button class="btn">Things you repeat</button></div>
+        <p class="small muted" style="margin-top:8px">"Things you repeat" suggests instructions from what you keep telling Claude.</p></div>`;
+  },
+  settings() {
+    return header('Settings', 'These apply to every project. Settings for one project are inside that project.', scopeAll, crumbAll('Settings')) + `
+      <div class="card" data-tabs>
+        <div class="tabsline"><button data-tab="new" class="on">New folders</button><button data-tab="claude">Claude Code</button><button data-tab="sum">Summaries</button><button data-tab="cloud">Cloud storage</button><button data-tab="web">Web research</button></div>
+
+        <div data-pane="new">
+          <h2>When Claude Code runs in a folder that is not a project</h2>
+          ${tiles('newmode', [['ask', 'Remind me, and save nothing', 'Says once that the folder can be added.'], ['manual', 'Ignore it, and save nothing', 'Says nothing.'], ['auto', 'Add it as a project automatically and start saving', 'At the level chosen below. Exclude client or private folders first.']], 'ask')}
+          <label id="autolevel" hidden>For folders added automatically, save<select><option>Conversation</option><option>Conversation and tool output</option><option>Activity only</option></select></label>
+          <h4>Folders that are never saved</h4>
+          <p class="hint">Nothing in these folders, or below them, is saved or added. This wins over everything else.</p>
+          <div class="between turn"><span class="mono">C:\\Private</span><button class="btn link">Remove</button></div>
+          <div class="row" style="margin-top:10px"><input type="text" placeholder="C:\\Clients" style="flex:1"><button class="btn">Add folder</button></div>
+          <div class="row" style="margin-top:16px"><button class="btn primary">Save</button></div>
+        </div>
+
+        <div data-pane="claude" hidden>
+          <h2>Claude Code accounts on this computer</h2>
+          <p class="hint">SessionKeep works in the accounts where it is turned on.</p>
+          <div class="between turn"><div><b style="text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink)">Default account</b><span class="small muted">~/.claude</span></div>${sw(false, 'Off')}</div>
+          <div class="between turn"><div><b style="text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink)">Second account</b><span class="small muted">used by this terminal</span></div>${sw(true, 'On')}</div>
+        </div>
+
+        <div data-pane="sum" hidden>
+          <h2>Session summaries</h2>
+          <p class="hint">After a session ends, Claude Code writes a short summary in the background, under your own sign-in. Each one uses a little of your plan.</p>
+          ${sw(true, 'Write summaries')}
+          <div class="grid2"><label>Model<select><option>Sonnet (recommended)</option><option>Opus</option><option>Haiku</option></select></label><label>At most per day<input type="text" value="20"></label></div>
+          <p class="small muted" style="margin-top:10px">7 of 20 used today · 61 summaries written · 2 sessions waiting</p>
+          <div class="row" style="margin-top:12px"><button class="btn primary">Save</button></div>
+        </div>
+
+        <div data-pane="cloud" hidden>
+          <h2>Cloud storage</h2>
+          <p class="hint">Buckets saved once, used when you share a project. Each project's Sharing page chooses one of them, or a bucket of its own.</p>
+          <div class="grid2">
+            <div class="card"><div class="between"><h2>Personal storage</h2><span class="pill ok">Set up</span></div>
+              <p class="hint">Your own bucket. Used unless you choose otherwise.</p>
+              <div class="mono">my-bucket</div><div class="small muted">1 project shared through it</div>
+              <div class="row" style="margin-top:10px"><button class="btn">Change</button><button class="btn">Forget</button></div></div>
+            <div class="card"><div class="between"><h2>Shared storage</h2><span class="pill ok">Set up</span></div>
+              <p class="hint">A bucket you share with others, such as your company's.</p>
+              <div class="mono">company-team</div><div class="small muted">1 project shared through it</div>
+              <div class="row" style="margin-top:10px"><button class="btn">Change</button><button class="btn">Forget</button></div></div>
+          </div>
+        </div>
+
+        <div data-pane="web" hidden>
+          <h2>Web research</h2>
+          <p class="hint">Lets SessionKeep fetch a page Claude cites, to check the exact words before a fact is marked verified. Nothing is fetched unless you or Claude asks.</p>
+          ${sw(true, 'Fetching pages is on')}
+        </div>
+      </div>`;
+  },
+  health() {
+    const checks = [['Program', 'SessionKeep 0.17.0, windows/amd64'], ['Where data is kept', 'C:\\Users\\you\\AppData\\Local\\SessionKeep'], ['Settings file', 'New folders: remind; 1 folder never saved'], ['Installed copy', 'sessionkeep 0.17.0'], ['Claude Code connection', '10 hook commands point at the program'], ['Database engine', 'SQLite 3.54.1 with search']];
+    return header('Health', 'Whether SessionKeep is set up and working on this computer.', scopeAll, crumbAll('Health')) + `
+      <div class="grid2">${checks.map(([a, b]) => `<div class="card"><div class="between"><h2>${a}</h2><span class="pill ok">Working</span></div><p class="small muted" style="margin:6px 0 0">${b}</p></div>`).join('')}</div>
+      <div class="row" style="margin-top:14px"><button class="btn">Run the checks again</button></div>`;
+  },
+};
+
+// ---- Pages inside a project ------------------------------------------------------------------
+const P = {
+  overview(p) {
+    if (p.state === 'off') return header('Overview', 'Nothing is saved for this project yet.', scopeProj(p), crumbProj(p, 'Overview')) +
+      `<div class="card empty">This folder is registered, but saving is set to "Nothing".<div class="row" style="justify-content:center;margin-top:12px"><a class="btn primary" href="#/p/${p.id}/settings">Choose what to save</a></div></div>`;
+    return header('Overview', 'Where this project stands, at a glance.', scopeProj(p), crumbProj(p, 'Overview')) + `
+      ${p.state === 'paused' ? `<div class="warnbox">Saving is paused for this project. <a href="#/p/${p.id}/settings">Resume saving</a></div><div style="height:14px"></div>` : ''}
+      <div class="grid3">
+        <div class="card stat"><b>${p.sessions}</b><span>sessions saved</span></div>
+        <div class="card stat"><b>${p.last}</b><span>last session</span></div>
+        <div class="card stat"><b>${p.shared ? 'Shared' : 'Not shared'}</b><span>${p.shared ? p.shared.storage : 'stays on this computer'}</span></div>
+      </div>
+      <div class="grid2" style="margin-top:14px">
+        <div class="card"><div class="between"><h2>Pick up where you stopped</h2><a class="btn link" href="#/p/${p.id}/resume">Open</a></div>
+          <dl class="parts"><dt>Done</dt><dd>Checkout totals round once per order.</dd><dt>Next</dt><dd>Add the receipt e-mail.</dd><dt>Blocking</dt><dd>Waiting for the mail provider key.</dd></dl>
+          <p class="small muted" style="margin-top:10px">Checkpoint from yesterday · 3 files changed since</p></div>
+        <div class="card"><div class="between"><h2>Latest sessions</h2><a class="btn link" href="#/p/${p.id}/sessions">All sessions</a></div>
+          <div class="turn"><b>25 minutes ago · running</b>Add the receipt e-mail template</div>
+          <div class="turn"><b>Yesterday · ended</b>Fix tax rounding in checkout</div>
+          <div class="turn"><b>2 days ago · ended</b>Write tests for the cart</div></div>
+      </div>
+      <div class="card"><h2>Instructions Claude gets here</h2>
+        <p class="small" style="margin:6px 0 0">2 for this project · 2 for all projects. <a href="#/p/${p.id}/rules">See them</a></p></div>`;
+  },
+  resume(p) {
+    return header('Pick up work', 'Where the work stood when you last stopped, and whether the code has moved since.', scopeProj(p), crumbProj(p, 'Pick up work')) + `
+      <div class="card"><div class="between"><h2>Last checkpoint</h2><span class="small muted">yesterday, 18:40</span></div>
+        <dl class="parts"><dt>Done</dt><dd>Checkout totals round once per order.</dd><dt>Next</dt><dd>Add the receipt e-mail.</dd><dt>Blocking</dt><dd>Waiting for the mail provider key.</dd></dl>
+        <div class="warnbox" style="margin-top:12px">The code has moved since: 2 commits and 3 changed files.</div></div>
+      <div class="card"><h2>The last things said here</h2>
+        <div class="turn"><b>You</b>Add the receipt e-mail template, plain text first.</div>
+        <div class="turn"><b>Claude</b>Added templates/receipt.txt and a test; HTML can follow.</div></div>
+      <div class="card"><h2>Write a new checkpoint</h2>
+        <label>Done<input type="text"></label><label>Next<input type="text"></label><label>Blocking<input type="text"></label>
+        <div class="row" style="margin-top:12px"><button class="btn primary">Save checkpoint</button></div></div>`;
+  },
+  recap(p) {
+    return header('Recap', 'What happened in this project over a period.', scopeProj(p), crumbProj(p, 'Recap')) + `
+      <div class="card"><div class="between"><span class="small muted">6 sessions and 41 requests, this week</span>${seg(['Today', 'Yesterday', 'This week'], 2)}</div>
+        <div class="turn"><b>Mon</b>Started the cart tests; fixed two flaky ones.</div>
+        <div class="turn"><b>Tue</b>Tax rounding bug found and fixed (round once per order).</div>
+        <div class="turn"><b>Wed</b>Receipt e-mail template, plain text.</div></div>`;
+  },
+  sessions(p) {
+    return header('Sessions', 'Every saved session in this project, newest first. They stay here when Claude Code clears its own copy.', scopeProj(p), crumbProj(p, 'Sessions')) + `
+      <div class="between" style="margin-bottom:12px">${seg(['All', 'Running', 'Ended'], 0)}<button class="btn">Bring in missing sessions from Claude Code</button></div>
+      <div class="grid2">
+        <div class="card" style="padding:6px 10px"><table><tbody>
+          <tr class="click"><td><b>Add the receipt e-mail template</b><div class="small muted">25 minutes ago · running · 12 pieces</div></td></tr>
+          <tr class="click"><td><b>Fix tax rounding in checkout</b><div class="small muted">Yesterday · ended · 34 pieces</div></td></tr>
+          <tr class="click"><td><b>Write tests for the cart</b><div class="small muted">2 days ago · ended · 51 pieces</div></td></tr>
+          <tr class="click"><td><b>Set up the project</b><div class="small muted">Last week · ended · 20 pieces</div></td></tr>
+        </tbody></table></div>
+        <div class="card"><div class="small muted">Yesterday · ended · 34 pieces of text</div><h2 style="margin-top:4px">Fix tax rounding in checkout</h2>
+          <div class="note" style="margin-top:8px"><b>Summary</b> (written by a model, not what was said): found per-line rounding; changed to round once per order; added a test.</div>
+          <div class="turn"><b>You</b>Why is the tax total off by one cent?</div>
+          <div class="turn"><b>Claude</b>Rounding happens per line. Summing first and rounding once fixes it.</div>
+          <div class="row" style="margin-top:10px"><button class="btn">Show all of it</button><button class="btn danger">Delete a piece</button></div></div>
+      </div>`;
+  },
+  search(p) {
+    return header('Search', `Find anything said in ${p.name}. To search every project at once, use Search everything.`, scopeProj(p), crumbProj(p, 'Search')) + `
+      <div class="card"><div class="row"><input type="text" placeholder="A decision, an error message, a file name" style="flex:1"><button class="btn primary">Search</button></div>
+        <div class="row" style="margin-top:10px"><span class="small muted">Who said it</span>${seg(['Anyone', 'Me', 'Claude', 'A tool'], 0)}</div></div>
+      <div class="card empty">Type something to search this project.</div>`;
+  },
+  rules(p) {
+    return header('Instructions', 'Claude receives these word for word at the start of every session in this project.', scopeProj(p), crumbProj(p, 'Instructions')) + `
+      <div class="card" data-tabs>
+        <div class="tabsline"><button data-tab="a" class="on">In use (2)</button><button data-tab="b">Retired (0)</button></div>
+        <div data-pane="a">
+          <div class="turn"><b>Since 18 Nov</b>Prices are integers in cents; never use floats for money.<div class="row" style="margin-top:8px"><button class="btn">Change the wording</button><button class="btn">Retire</button></div></div>
+          <div class="turn"><b>Since 20 Nov</b>Run npm test before saying something is done.<div class="row" style="margin-top:8px"><button class="btn">Change the wording</button><button class="btn">Retire</button></div></div>
+        </div>
+        <div data-pane="b" hidden><div class="empty">No retired instructions.</div></div>
+      </div>
+      <div class="note" style="margin-top:14px">Claude also gets <b>2 instructions for all projects</b> here. <a href="#/rules">Change those</a></div>
+      <div class="card"><h2>Add an instruction for ${p.name}</h2>
+        <label>Instruction<textarea placeholder="Something Claude should always do or never do in this project"></textarea></label>
+        <div class="row" style="margin-top:12px"><button class="btn primary">Add</button><button class="btn">Things you repeat</button></div></div>`;
+  },
+  research(p) {
+    return header('Research', 'Facts Claude looked up on the web for this project, each with the page and the exact words that back it.', scopeProj(p), crumbProj(p, 'Research')) + `
+      <div class="row" style="margin-bottom:12px">${seg(['All (3)', 'Verified (1)', 'Stale (1)', 'Withdrawn (1)'], 0)}</div>
+      <div class="card"><div class="between"><h2>The mail provider allows 100 e-mails a day on the free plan</h2><span class="pill ok">Verified</span></div>
+        <div class="quote" style="margin-top:8px">"The free plan includes 100 emails per day."</div>
+        <p class="small muted">From the provider's pricing page · checked 2 days ago · rechecks after 30 days</p>
+        <div class="row"><button class="btn">Check the page again</button><button class="btn">Withdraw</button></div></div>
+      <div class="card"><div class="between"><h2>Node 22 is the active LTS line</h2><span class="pill warn">Stale</span></div>
+        <p class="small muted">Last checked 3 months ago; it may have changed.</p><div class="row"><button class="btn">Check the page again</button></div></div>`;
+  },
+  sharing(p) {
+    if (p.shared) return header('Sharing', 'This project is shared through the cloud. Nothing is sent or received until you press Sync now.', scopeProj(p), crumbProj(p, 'Sharing')) + `
+      <div class="card"><div class="between"><h2>Shared as "${p.shared.as}"</h2><span class="pill share">${p.shared.storage}</span></div>
+        <p class="small muted">Bucket <span class="mono">${p.shared.bucket}</span> · last synced 2 hours ago · 1 bundle waiting from Kim</p>
+        <div class="row" style="margin-top:12px"><button class="btn primary">Sync now</button></div>
+        <p class="small muted" style="margin-top:8px">Sync shows what would be received and sent first, including any instructions a colleague sent.</p></div>
+      <div class="grid2">
+        <div class="card"><h2>Passphrase</h2><p class="hint">Forgot it, or a colleague needs it? It can be shown here because this computer is connected.</p>
+          <button class="btn" data-toggle="pp">Show passphrase</button>
+          <div id="pp" hidden style="margin-top:10px"><div class="warnbox">Anyone who sees it and can reach the bucket can read this project. Make sure nobody else can see your screen.</div>
+            <div class="quote" style="margin-top:8px">correct horse battery staple</div><div class="row" style="margin-top:8px"><button class="btn">Copy</button></div></div></div>
+        <div class="card"><h2>Stop sharing</h2><p class="hint">This computer forgets the passphrase and stops sending and receiving. Everything saved here stays; what is in the bucket stays.</p>
+          <button class="btn danger">Stop sharing</button></div>
+      </div>`;
+    return header('Sharing', 'This project stays on this computer. Share it to exchange its memory with colleagues through a bucket you choose.', scopeProj(p), crumbProj(p, 'Sharing')) + `
+      <div class="card"><h2>Share ${p.name} through the cloud</h2>
+        <p class="hint">Its instructions, checkpoints and conversations are sent, encrypted on this computer, when you press Sync now.</p>
+        <h4>Where it is kept</h4>
+        ${tiles('where', [['personal', 'Personal storage', 'Your own bucket my-bucket.'], ['shared', 'Shared storage', 'The bucket company-team you share with others.'], ['own', 'A bucket of its own', 'Another bucket for this project only, such as one a client gave you.']], 'personal')}
+        <div id="ownbucket" hidden style="border-left:2px solid var(--line2); padding-left:12px; margin-top:6px">
+          <label>Storage address<input type="text" placeholder="https://ACCOUNT_ID.r2.cloudflarestorage.com"></label>
+          <label>Bucket name<input type="text"></label>
+          <div class="grid2"><label>Access Key ID<input type="password"></label><label>Secret Access Key<input type="password"></label></div></div>
+        <label>Shared project name<input type="text" value="${p.id}"><span class="small muted" style="font-weight:400">Colleagues must type exactly the same name.</span></label>
+        <label>Passphrase<span class="reveal"><input type="password" id="newpp"><button class="btn" data-reveal="newpp">Show</button></span><span class="small muted" style="font-weight:400">At least 8 characters. Make one up if you are the first; otherwise use the one your colleague gave you.</span></label>
+        <div class="row" style="margin-top:14px"><button class="btn primary">Turn sharing on</button></div>
+        <p class="small muted" style="margin-top:8px">Personal and shared storage are set up once in <a href="#/settings">Settings</a>.</p></div>`;
+  },
+  settings(p) {
+    const lv = { 'Conversation': 'conversation', 'Conversation and tool output': 'extended', 'Activity only': 'metadata', 'Nothing': 'off' }[p.level];
+    return header('Project settings', `Settings for ${p.name} only.`, scopeProj(p), crumbProj(p, 'Project settings')) + `
+      <div class="card"><h2>What is saved</h2>
+        ${tiles('lvl', [['conversation', 'Conversation', 'What you ask and what Claude answers. The usual choice.'], ['extended', 'Conversation and tool output', 'Also short excerpts of what tools printed.'], ['metadata', 'Activity only', 'Times and tool names. No text at all.'], ['off', 'Nothing', 'Registered, but nothing is saved.']], lv)}
+        <div class="row" style="margin-top:12px"><button class="btn primary">Save</button><button class="btn">${p.state === 'paused' ? 'Resume saving' : 'Pause saving'}</button></div></div>
+      <div class="card"><h2>How Claude gets earlier sessions</h2>
+        ${tiles('rec', [['asked', 'When asked', 'Claude gets your instructions and the latest checkpoint, and looks into earlier sessions when you refer to them.'], ['automatic', 'Automatically', 'Also: each new session is told what the latest sessions were about, and each request gets the saved pieces that share its words.']], 'asked')}
+        <div class="row" style="margin-top:12px"><button class="btn primary">Save</button></div></div>
+      <div class="card"><h2>Folder</h2><p class="hint">Renamed or moved the folder? Point the project at the new place so its saved sessions stay with it.</p>
+        <div class="mono">${p.path}</div>
+        <div class="row" style="margin-top:10px"><input type="text" placeholder="New folder" style="flex:1"><button class="btn">Move project</button></div></div>
+      <div class="card danger-zone"><h2>Delete</h2><p class="hint">Both show exactly what would be removed and ask before deleting.</p>
+        <div class="row"><button class="btn danger">Delete saved conversations</button><button class="btn danger">Delete the whole project</button></div></div>`;
+  },
+};
+
+// ---- Folder picker -----------------------------------------------------------------------------
+// In the real program the folder names would come from SessionKeep's own local server, which can
+// read this computer's folders (a web page cannot see full paths by itself). Here they are made up,
+// with a switch to show how the same window looks on Windows, macOS and Linux.
+const FS = {
+  windows: {
+    sep: '\\',
+    places: [['Home', 'C:\\Users\\you'], ['Desktop', 'C:\\Users\\you\\Desktop'], ['Documents', 'C:\\Users\\you\\Documents'], ['Drive C:', 'C:\\'], ['Drive D:', 'D:\\']],
+    tree: {
+      'C:\\': ['Code', 'Clients', 'Program Files', 'Users', 'Windows'],
+      'C:\\Code': ['shop-app*', 'side-notes*', 'scratch*', 'api-gateway+', 'website+'],
+      'C:\\Clients': ['acme'], 'C:\\Clients\\acme': ['site*', 'mobile-app+'],
+      'C:\\Users': ['you'], 'C:\\Users\\you': ['Desktop', 'Documents', 'Downloads', 'Projects'],
+      'C:\\Users\\you\\Projects': ['invoice-tool+', 'notes'], 'C:\\Users\\you\\Documents': ['Reports'],
+      'D:\\': ['Work', 'Backups'], 'D:\\Work': ['legacy-crm+', 'data-scripts+'],
+    },
+  },
+  mac: {
+    sep: '/',
+    places: [['Home', '/Users/you'], ['Desktop', '/Users/you/Desktop'], ['Documents', '/Users/you/Documents'], ['Computer', '/'], ['External disk', '/Volumes/Work']],
+    tree: {
+      '/': ['Applications', 'Users', 'Volumes'], '/Users': ['you'],
+      '/Users/you': ['Code', 'Desktop', 'Documents', 'Downloads'],
+      '/Users/you/Code': ['shop-app*', 'side-notes*', 'api-gateway+', 'website+'],
+      '/Volumes': ['Work'], '/Volumes/Work': ['legacy-crm+'],
+    },
+  },
+  linux: {
+    sep: '/',
+    places: [['Home', '/home/you'], ['Projects', '/home/you/projects'], ['Computer', '/'], ['Mounted disks', '/mnt']],
+    tree: {
+      '/': ['home', 'mnt', 'opt', 'srv'], '/home': ['you'],
+      '/home/you': ['projects', 'Documents', 'Downloads'],
+      '/home/you/projects': ['shop-app*', 'api-gateway+', 'dotfiles+'],
+      '/mnt': ['data'], '/mnt/data': ['ml-experiments+'], '/srv': ['www+'],
+    },
+  },
+};
+let pk = { os: 'windows', at: 'C:\\Code' };
+const pkJoin = (dir, name) => dir.endsWith(FS[pk.os].sep) ? dir + name : dir + FS[pk.os].sep + name;
+function pkCrumbs(path) {
+  const sep = FS[pk.os].sep;
+  if (pk.os === 'windows') {
+    const parts = path.split('\\').filter(Boolean);
+    return parts.map((p, i) => [i === 0 ? p + '\\' : p, i === 0 ? p + '\\' : parts.slice(0, i + 1).join('\\')]);
+  }
+  const parts = path.split('/').filter(Boolean);
+  return [['/', '/'], ...parts.map((p, i) => [p, '/' + parts.slice(0, i + 1).join('/')])];
+}
+function pkRender() {
+  const fs = FS[pk.os];
+  const kids = (fs.tree[pk.at] || []);
+  document.getElementById('pk-places').innerHTML = '<small>Places</small>' + fs.places.map(([label, path]) =>
+    `<button data-pk-go="${path}" class="${pk.at === path ? 'on' : ''}">${label}</button>`).join('');
+  document.getElementById('pk-path').innerHTML = pkCrumbs(pk.at).map(([label, path], i) =>
+    (i ? '<span class="sep">›</span>' : '') + `<button class="crumbbtn" data-pk-go="${path}">${label}</button>`).join('');
+  document.getElementById('pk-list').innerHTML = kids.length ? kids.map(k => {
+    const done = k.endsWith('*'), git = k.endsWith('+'), name = k.replace(/[*+]$/, '');
+    return `<li><button data-pk-go="${pkJoin(pk.at, name)}">${I.folder}${name}${done ? '<span class="tag done">Already a project</span>' : git ? '<span class="tag">Git repository</span>' : ''}</button></li>`;
+  }).join('') : '<li class="pk-empty">No folders inside. Choose this folder, or go back.</li>';
+  document.getElementById('pk-chosen').textContent = pk.at;
+  document.querySelectorAll('[data-pk-os]').forEach(b => b.classList.toggle('on', b.dataset.pkOs === pk.os));
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-browse]')) { e.preventDefault(); pkRender(); document.getElementById('picker').showModal(); }
+  const go = e.target.closest('[data-pk-go]');
+  if (go) { pk.at = go.dataset.pkGo; pkRender(); }
+  const os = e.target.closest('[data-pk-os]');
+  if (os) { pk.os = os.dataset.pkOs; pk.at = FS[pk.os].places[0][1]; pkRender(); }
+  if (e.target.closest('[data-pk-up]')) {
+    const c = pkCrumbs(pk.at); if (c.length > 1) { pk.at = c[c.length - 2][1]; pkRender(); }
+  }
+  if (e.target.closest('[data-pk-pick]')) {
+    const input = document.getElementById('addpath'); if (input) input.value = pk.at;
+    document.getElementById('picker').close();
+  }
+  if (e.target.closest('[data-pk-cancel]')) document.getElementById('picker').close();
+});
+
+function render() {
+  const r = route();
+  sidebar(r);
+  const main = document.getElementById('main');
+  main.innerHTML = r.p ? (P[r.page] || P.overview)(r.p) : (G[r.page] || G.overview)();
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', render);
+render();
+</script>
+</body>
+</html>
