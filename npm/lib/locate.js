@@ -21,7 +21,19 @@ function bundled(platform = process.platform, arch = process.arch, base = root) 
   const t = target(platform, arch);
   if (!t) return null;
   const p = path.join(base, 'vendor', t, binaryName(platform));
-  return fs.existsSync(p) ? p : null;
+  if (!fs.existsSync(p)) return null;
+  if (platform !== 'win32') makeExecutable(p);
+  return p;
+}
+
+// A package packed on Windows records every file as not executable, and npm marks only the
+// `bin` script executable when it installs. Without this the macOS and Linux programs could not
+// be started. When the folder cannot be written, starting the program reports the reason.
+function makeExecutable(p) {
+  try {
+    const mode = fs.statSync(p).mode & 0o777;
+    if ((mode & 0o111) !== 0o111) fs.chmodSync(p, mode | 0o111);
+  } catch (_) { /* reported when the program is started */ }
 }
 
 // Where `sessionkeep install` puts the program. Mirrors internal/install.Dir in the Go code.

@@ -24,7 +24,7 @@ if [ "$1" = all ]; then set -- windows/amd64 windows/arm64 linux/amd64 linux/arm
 stage=dist/npm/sessionkeep
 rm -rf dist/npm
 mkdir -p "$stage"
-cp -r npm/bin npm/lib npm/postinstall.js npm/README.md "$stage/"
+cp -r npm/bin npm/lib npm/postinstall.js npm/README.md LICENSE "$stage/"
 for t in "$@"; do
   os="${t%/*}"; arch="${t#*/}"; name=sessionkeep
   [ "$os" = windows ] && name=sessionkeep.exe
@@ -32,6 +32,8 @@ for t in "$@"; do
   GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X sessionkeep/internal/buildinfo.Version=$version" -o "$stage/vendor/$os-$arch/$name" ./cmd/sessionkeep
   echo "built $os-$arch"
 done
+# Licence notices of everything compiled into the programs (Go and each module).
+bash scripts/notices.sh "$stage/THIRD_PARTY_NOTICES.txt" "$stage"/vendor/*/sessionkeep*
 # The version is the only thing that changes in package.json.
 sed "s/\"version\": \"0.0.0-dev\"/\"version\": \"$version\"/" npm/package.json > "$stage/package.json"
 grep -q "\"version\": \"$version\"" "$stage/package.json"

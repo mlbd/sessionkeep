@@ -39,7 +39,7 @@ const (
 	ExitNeedsConsent = 4
 )
 
-const usage = `sessionkeep - local-first developer memory (pre-release; the Claude Code plugin is not built yet)
+const usage = `sessionkeep - local-first developer memory for Claude Code
 
 Usage:
   sessionkeep setup [--auto-add manual|ask|auto] [--level LEVEL]

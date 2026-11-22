@@ -26,6 +26,17 @@ test('a package without a program for this computer says so instead of guessing'
   assert.strictEqual(choose(['status'], '1.0.0', 'linux', 'x64', {}, base), null);
 });
 
+test('the macOS and Linux programs are made executable before they are started', { skip: process.platform === 'win32' && 'Windows has no executable bit' }, () => {
+  const base = tmp();
+  const dir = path.join(base, 'vendor', 'linux-amd64');
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, 'sessionkeep');
+  fs.writeFileSync(p, '', { mode: 0o644 });
+  fs.chmodSync(p, 0o644);
+  assert.strictEqual(bundled('linux', 'x64', base), p);
+  assert.strictEqual(fs.statSync(p).mode & 0o777, 0o755);
+});
+
 test('the install folder matches the Go program', () => {
   assert.strictEqual(installDir('win32', { LOCALAPPDATA: 'C:\\L' }), path.join('C:\\L', 'Programs', 'SessionKeep'));
   assert.strictEqual(installDir('win32', {}), null);
