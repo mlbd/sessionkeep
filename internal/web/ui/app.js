@@ -204,7 +204,7 @@ function badge(id, n, kind, words) {
 function openDialog(heading, body, buttons) {
   dialog.replaceChildren(el('h2', { id: 'dialog-title', text: heading }), ...body, el('div', { class: 'row end' }, buttons));
   dialog.showModal();
-  dialog.querySelector('button').focus();
+  (dialog.querySelector('.row.end button') || dialog.querySelector('button')).focus();
 }
 
 // Deletion always shows what would be removed first; nothing is deleted until confirmed.
@@ -372,13 +372,25 @@ function shareProject(p) {
   paint();
   const shared = el('input', { type: 'text', id: 'sh-name', class: 'code', autocomplete: 'off', value: slug });
   const pass = el('input', { type: 'password', id: 'sh-pass', autocomplete: 'new-password' });
+  pass.setAttribute('aria-label', 'Passphrase for this project');
+  // Show what is being typed, so a mistyped passphrase is caught before it is used.
+  const reveal = el('button', { type: 'button', class: 'btn', 'aria-pressed': 'false', 'aria-label': 'Show the passphrase', text: 'Show' });
+  reveal.addEventListener('click', e => {
+    e.preventDefault();
+    const shown = pass.type === 'password';
+    pass.type = shown ? 'text' : 'password';
+    reveal.textContent = shown ? 'Hide' : 'Show';
+    reveal.setAttribute('aria-pressed', String(shown));
+    reveal.setAttribute('aria-label', shown ? 'Hide the passphrase' : 'Show the passphrase');
+    pass.focus();
+  });
   const wrong = alertLine();
   openDialog(`Share ${p.name} through the cloud?`, [
     el('p', { text: 'Its instructions, checkpoints and conversations can then be sent, encrypted, to the bucket you choose, and colleagues who share the same project can receive them. Nothing is sent until you press Sync now.' }),
     where,
     ownBox,
     field('Shared project name', shared, 'Colleagues must type exactly the same name. Lower-case letters, digits and dashes.'),
-    field('Passphrase for this project', pass, `At least ${team.min_passphrase || 12} characters. Make one up if you are the first to share this project; otherwise type the one your colleague gave you. Keep it somewhere safe: it is never shown again, and anyone who has it and can reach the bucket can read what is sent.`),
+    field('Passphrase for this project', el('div', { class: 'reveal' }, pass, reveal), `At least ${team.min_passphrase || 8} characters. Make one up if you are the first to share this project; otherwise type the one your colleague gave you. Keep it somewhere safe: only a computer connected to this project can show it again (Show passphrase), and anyone who has it and can reach the bucket can read what is sent.`),
     wrong,
   ], [
     btn('Cancel', 'btn', () => dialog.close()),
@@ -425,12 +437,41 @@ async function teamSync(p) {
   ]);
 }
 
+// The passphrase stored on this computer for a shared project, read back after a confirmation,
+// for someone who forgot it (D131). It is fetched only when confirmed and is not kept in the page.
+async function showPassphrase(p) {
+  const shared = team.projects[p.id] || {};
+  openDialog(`Show the passphrase of ${p.name}?`, [
+    el('p', { text: `It opens everything sent for "${shared.name || p.name}" in the bucket. Anyone who sees it and can reach the bucket can read this project's instructions, checkpoints and conversations.` }),
+    el('p', { class: 'quiet small', text: 'Make sure nobody else can see your screen. Give it to a colleague only in person or through a password manager, not in the same message as the storage keys.' }),
+  ], [
+    btn('Cancel', 'btn', () => dialog.close()),
+    btn('Show it', 'btn primary', async () => {
+      const r = await api('POST', '/api/team/passphrase', { project: p.id, confirm: true });
+      if (!r.ok || !r.data || typeof r.data.passphrase !== 'string') { dialog.close(); return say(problem(r), 'bad'); }
+      const secret = el('blockquote', { class: 'exact', text: r.data.passphrase });
+      const copied = el('span', { class: 'quiet small', role: 'status' });
+      const canCopy = typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText;
+      openDialog(`Passphrase of ${p.name}`, [
+        el('p', { class: 'quiet small', text: `Shared as "${r.data.name}".` }),
+        secret,
+        copied,
+      ], [
+        canCopy ? btn('Copy', 'btn', async () => {
+          try { await navigator.clipboard.writeText(r.data.passphrase); copied.textContent = 'Copied. Clear it from the clipboard when you are done.'; } catch (_) { copied.textContent = 'Could not copy; select the text instead.'; }
+        }) : null,
+        btn('Close', 'btn primary', () => dialog.close()),
+      ].filter(Boolean));
+    }),
+  ]);
+}
+
 async function stopSharing(p) {
   const r = await api('POST', '/api/team/disconnect', { project: p.id, confirm: false });
   if (r.status !== 409) return say(problem(r), 'bad');
   openDialog(`Stop sharing ${p.name}?`, [
     el('p', { text: 'This computer forgets the passphrase and what it sent and received for this project. Nothing more is sent or received. Everything saved here stays.' }),
-    el('p', { class: 'quiet small', text: 'What is already in the bucket stays there until you delete it in the storage service, and colleagues keep what they received. To share again later you need the shared name and the passphrase.' }),
+    el('p', { class: 'quiet small', text: 'What is already in the bucket stays there until you delete it in the storage service, and colleagues keep what they received. To share again later you need the shared name and the passphrase: if you are not sure you remember it, keep sharing and use Show passphrase first.' }),
   ], [
     btn('Keep sharing', 'btn', () => dialog.close()),
     btn('Stop sharing', 'btn danger', async () => {
@@ -1070,7 +1111,8 @@ async function projectsView(sel) {
         btn(p.paused ? 'Resume saving' : 'Pause saving', p.paused ? 'btn primary' : 'btn', () => act(`/api/projects/${p.id}/${p.paused ? 'resume' : 'pause'}`, {}, p.paused ? 'Saving again.' : 'Paused.'))),
       recall,
       el('div', { class: 'row' }, btn('Change how Claude gets them', 'btn', () => act(`/api/projects/${p.id}/recall`, { mode: recall.value() }, 'Changed. It applies from the next request.'))),
-      shared ? el('div', { class: 'row' }, btn('Sync now', 'btn primary', () => teamSync(p), `Receive and send the work on ${p.name}`), btn('Stop sharing', 'btn', () => stopSharing(p), `Stop sharing ${p.name}`),
+      shared ? el('div', { class: 'row' }, btn('Sync now', 'btn primary', () => teamSync(p), `Receive and send the work on ${p.name}`),
+        btn('Show passphrase', 'btn', () => showPassphrase(p), `Show the passphrase of ${p.name}`), btn('Stop sharing', 'btn', () => stopSharing(p), `Stop sharing ${p.name}`),
         el('span', { class: 'quiet small', text: `Shared through the cloud as "${shared.name}" in the bucket ${shared.bucket} (${placeOf(shared)}). Sync shows what would be received and sent first.` }))
         : el('div', { class: 'row' }, btn('Share through the cloud', 'btn', () => shareProject(p), `Share ${p.name} through the cloud`),
           el('span', { class: 'quiet small', text: 'Not shared: this project stays on this computer. Turn this on only for a project you work on with others.' })),

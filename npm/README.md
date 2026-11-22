@@ -84,7 +84,7 @@ Run `sessionkeep dashboard` and open the address it prints.
    Nothing is sent yet. The keys are kept protected on this computer and never shown again.
 2. **Projects**, on the project: **Share through the cloud**. Choose where it is kept (personal,
    shared, or a bucket of its own, whose address and keys you then type in the same dialog), a
-   shared project name (lower-case letters, digits and dashes) and a passphrase of at least 12
+   shared project name (lower-case letters, digits and dashes) and a passphrase of at least 8
    characters. The first person makes the name and passphrase up.
 3. **Sync now** receives your colleagues' work and then sends yours. Sync only happens when you
    press it. The project's panel says which storage and bucket it uses.
@@ -138,6 +138,12 @@ it; `sessionkeep team` lists every form.
 - The passphrase cannot be changed afterwards, and without it the bundles cannot be read. Keep it
   somewhere safe. To lock someone out of future work, delete their token and share again under
   a new shared name with a new passphrase. What they already received stays with them.
+- **If you forget a passphrase:** a computer still connected to the project keeps syncing with
+  the copy stored there, and can show it again: **Show passphrase** on the project (it asks
+  first) or `sessionkeep team passphrase --yes`. A colleague who shares the project can also
+  tell you. If nobody has it any more, nothing can open the bundles already sent: there is no
+  reset. Share the project again under a new shared name with a new passphrase; the first sync
+  sends everything again, and your own saved memory is never affected.
 - Forgetting a saved storage leaves the projects already shared through it working; SessionKeep
   never deletes anything from a bucket.
 - Cloudflare R2 is the service this has been used with. Other S3-compatible services may work

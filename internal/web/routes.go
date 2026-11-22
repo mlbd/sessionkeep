@@ -340,8 +340,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 	// Sharing a project through a storage bucket. The keys and a project's passphrase are typed
 	// into the page once (ADR-0010); they are handed to the command on its standard input, never
-	// on a command line, and no endpoint ever returns them. Without "confirm": true, sync, push,
-	// pull and disconnect answer 409 with what would happen.
+	// on a command line, and no endpoint returns a key. A project's passphrase is returned only by
+	// /api/team/passphrase with "confirm": true (D131). Without "confirm": true, sync, push, pull,
+	// disconnect and passphrase answer 409 with what would happen.
 	mux.HandleFunc("GET /api/team", func(w http.ResponseWriter, r *http.Request) {
 		s.command(w, "team", "status", flag("project", r.URL.Query().Get("project")))
 	})
@@ -417,7 +418,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 			return
 		}
 		a := r.PathValue("action")
-		if a != "push" && a != "pull" && a != "sync" && a != "disconnect" {
+		if a != "push" && a != "pull" && a != "sync" && a != "disconnect" && a != "passphrase" {
 			fail(w, http.StatusNotFound, "not_found", "no such action")
 			return
 		}

@@ -99,7 +99,7 @@ type State struct {
 
 // MinPassphrase is the shortest passphrase accepted. The passphrase is all that stands between
 // the stored bundles and anyone who can read the bucket.
-const MinPassphrase = 12
+const MinPassphrase = 8
 
 var nameForm = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 

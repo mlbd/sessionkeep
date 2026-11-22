@@ -356,3 +356,6 @@ dialog h2 { font-size: 18px; letter-spacing: -0.01em; }
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 .subfields h3 { font-size: 13.5px; font-weight: 600; }
+.reveal { display: flex; gap: 8px; align-items: center; }
+.reveal input { flex: 1; min-width: 0; }
+.reveal .btn { flex: none; min-width: 64px; }

@@ -34,6 +34,7 @@ const teamUsage = `usage: sessionkeep team storage [--storage personal|shared] -
        sessionkeep team push [--project ID_OR_PATH] [--no-sessions] [--yes]
        sessionkeep team pull [--project ID_OR_PATH] [--yes]
        sessionkeep team disconnect [--project ID_OR_PATH] [--yes]
+       sessionkeep team passphrase [--project ID_OR_PATH] [--yes]   show the passphrase stored here for a shared project
        sessionkeep team storage-forget [--storage personal|shared] [--yes]`
 
 // Environment variables that carry secrets into `team connect`.
@@ -114,6 +115,11 @@ func teamCmd(inv invocation, rest []string) error {
 			return err
 		}
 		return teamDisconnect(inv)
+	case "passphrase":
+		if err := inv.only("project", "yes"); err != nil {
+			return err
+		}
+		return teamPassphrase(inv)
 	}
 	return usageErr("%s", teamUsage)
 }
@@ -702,6 +708,27 @@ func teamStatus(inv invocation) error {
 		"keys_protected_by_os": keep.Protected, "to_send": c, "bundles_to_receive": len(files), "bundles_in_bucket": len(all), "unreadable_bundles": unreadable},
 		fmt.Sprintf("project %q is connected to bucket %s at %s as %q (connected %.10s).\nTo send: %d instruction(s), %d checkpoint(s), %d piece(s) of text in %d session(s).\nTo receive: %d bundle(s) from others; the bucket holds %d for this project in all.\n",
 			proj.Name, conn.Bucket, conn.Endpoint, conn.Name, conn.ConnectedAt, c.Instructions, c.Checkpoints, c.Turns, c.Sessions, len(files), len(all)))
+}
+
+// teamPassphrase shows the passphrase stored for a shared project, so that someone who forgot it
+// can read it back on a computer that is still connected (to connect another computer, or to
+// give it to a colleague). Nothing is shown without --yes (D131).
+func teamPassphrase(inv invocation) error {
+	st, err := load(inv, true)
+	if err != nil {
+		return err
+	}
+	proj, conn, sec, err := teamProject(inv, st)
+	if err != nil {
+		return err
+	}
+	if inv.flags["yes"] == "" {
+		inv.emit(map[string]any{"shown": false, "project_id": proj.ID, "name": conn.Name},
+			fmt.Sprintf("NOT SHOWN YET. This would show the passphrase of project %q (shared as %q) on the screen.\nAnyone who sees it and can reach the bucket can read what is sent for this project.\nRun the same command with --yes.\n", proj.Name, conn.Name))
+		return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was shown; add --yes to confirm"}
+	}
+	return inv.emit(map[string]any{"shown": true, "project_id": proj.ID, "name": conn.Name, "passphrase": sec.Passphrase},
+		fmt.Sprintf("The passphrase of project %q (shared as %q):\n%s\n", proj.Name, conn.Name, sec.Passphrase))
 }
 
 func teamDisconnect(inv invocation) error {

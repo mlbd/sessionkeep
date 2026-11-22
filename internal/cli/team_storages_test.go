@@ -68,8 +68,13 @@ func TestEachProjectGoesToTheStorageChosenForIt(t *testing.T) {
 		t.Fatalf("saving the shared storage: %d %+v", code, r.Error)
 	}
 
+	// A passphrase needs at least 8 characters.
+	if code := ba.do("POST", "/api/team/connect", map[string]string{"project": own, "name": "side-project", "passphrase": "seven77"}, nil, &r); code != http.StatusBadRequest || !strings.Contains(r.Error.Message, "at least 8") {
+		t.Fatalf("a 7-character passphrase: %d %+v", code, r.Error)
+	}
+
 	// Personal by default, shared when chosen, and a bucket of its own for the client project.
-	if code := ba.do("POST", "/api/team/connect", map[string]string{"project": own, "name": "side-project", "passphrase": pass}, nil, &r); code != http.StatusOK {
+	if code := ba.do("POST", "/api/team/connect", map[string]string{"project": own, "name": "side-project", "passphrase": "eight888"}, nil, &r); code != http.StatusOK {
 		t.Fatalf("sharing through the personal storage: %d %+v", code, r.Error)
 	}
 	if code := ba.do("POST", "/api/team/connect", map[string]string{"project": work, "name": "company-app", "passphrase": pass, "storage": "shared"}, nil, &r); code != http.StatusOK {
@@ -149,6 +154,32 @@ func TestEachProjectGoesToTheStorageChosenForIt(t *testing.T) {
 	}
 	if len(theirs.fake.Objects) != 0 {
 		t.Error("the company project was sent to the colleague's personal bucket")
+	}
+
+	// A forgotten passphrase can be read back on a computer that is still connected, but only
+	// after confirming; the question itself never carries it.
+	if code := ba.do("POST", "/api/team/passphrase", map[string]any{"project": own}, nil, &raw); code != http.StatusConflict || strings.Contains(string(raw.Data), "eight888") {
+		t.Fatalf("the passphrase without confirming: %d %s", code, raw.Data)
+	}
+	var shown struct {
+		Data struct {
+			Shown            bool
+			Name, Passphrase string
+		}
+	}
+	if code := ba.do("POST", "/api/team/passphrase", map[string]any{"project": own, "confirm": true}, nil, &shown); code != http.StatusOK || !shown.Data.Shown || shown.Data.Passphrase != "eight888" || shown.Data.Name != "side-project" {
+		t.Fatalf("the passphrase after confirming: %d %+v", code, shown.Data)
+	}
+	if code, out, _ := a.run("team", "passphrase", "--project", own); code != ExitNeedsConsent || strings.Contains(out, "eight888") || !strings.Contains(out, "NOT SHOWN YET") {
+		t.Errorf("team passphrase without --yes: exit %d, %s", code, out)
+	}
+	if out := a.ok("team", "passphrase", "--project", work, "--yes"); !strings.Contains(out, pass) {
+		t.Errorf("team passphrase --yes: %s", out)
+	}
+	other := b.dir("not-shared")
+	b.ok("project", "add", other, "--capture", "conversation")
+	if code, _, errOut := b.run("team", "passphrase", "--project", other, "--yes"); code == ExitOK || !strings.Contains(errOut, "not shared") {
+		t.Errorf("the passphrase of a project that is not shared: exit %d, %s", code, errOut)
 	}
 
 	// Forgetting the shared storage leaves the personal one and every shared project alone.
