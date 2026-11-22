@@ -20,8 +20,9 @@ import (
 
 // Kind and Format identify a handoff file.
 const (
-	Kind   = "sessionkeep-handoff"
-	Format = 1
+	Kind    = "sessionkeep-handoff"
+	oldKind = "devweft-handoff" // files made before the program was renamed are still read
+	Format  = 1
 )
 
 // Limits on what Read accepts.
@@ -37,7 +38,8 @@ type File struct {
 	Format       int           `json:"format"`
 	CreatedAt    string        `json:"created_at"`
 	MadeBy       string        `json:"sessionkeep_version"`
-	From         string        `json:"from,omitempty"` // a name the sender chose to give
+	OldMadeBy    string        `json:"devweft_version,omitempty"` // read from files made before the rename; never written
+	From         string        `json:"from,omitempty"`            // a name the sender chose to give
 	SourceDevice string        `json:"source_device"`
 	Project      Project       `json:"project"`
 	Instructions []Instruction `json:"instructions"`
@@ -122,7 +124,7 @@ func checkText(what, v string) error {
 
 // Validate checks every field of a file read from disk.
 func (f File) Validate() error {
-	if f.Kind != Kind {
+	if f.Kind != Kind && f.Kind != oldKind {
 		return fmt.Errorf("%w: it is not marked as one", ErrInvalid)
 	}
 	if f.Format != Format {
@@ -234,6 +236,10 @@ func Parse(raw []byte) (File, error) {
 	if err := dec.Decode(&f); err != nil {
 		return f, fmt.Errorf("%w: it cannot be read as one (%v)", ErrInvalid, err)
 	}
+	if f.MadeBy == "" {
+		f.MadeBy = f.OldMadeBy
+	}
+	f.OldMadeBy = ""
 	return f, f.Validate()
 }
 

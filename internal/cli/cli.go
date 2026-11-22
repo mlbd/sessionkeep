@@ -494,6 +494,15 @@ func load(inv invocation, create bool) (state, error) {
 		return state{}, &cmdError{ExitUnavailable, "no_data_dir", err.Error()}
 	}
 	if create {
+		// Data saved under the program's earlier name moves here first. What was sent to and
+		// received from a team is forgotten with it: bundles now live elsewhere in the bucket.
+		from, err := config.AdoptOld(p)
+		if err != nil {
+			return state{}, &cmdError{ExitUnavailable, "old_data_not_moved", err.Error()}
+		}
+		if from != "" {
+			os.RemoveAll(filepath.Join(p.DataDir, "team"))
+		}
 		if err := config.Ensure(p); err != nil {
 			return state{}, &cmdError{ExitUnavailable, "data_dir_unusable", err.Error()}
 		}

@@ -55,3 +55,13 @@ func TestAFileIsCheckedFieldByField(t *testing.T) {
 		}
 	}
 }
+
+// A file made before the program was renamed is marked with the old name; it is still read.
+func TestAFileMadeUnderTheEarlierNameIsRead(t *testing.T) {
+	raw := `{"kind":"devweft-handoff","format":1,"created_at":"2026-11-21T10:00:00Z","devweft_version":"0.14.0","source_device":"dev-1",` +
+		`"project":{"id":"p-1","name":"app"},"sessions":[{"id":"s-1","started_at":"2026-11-20T09:00:00Z","turns":[{"id":"t-1","who":"user","at":"2026-11-20T09:00:01Z","text":"Hello"}]}]}`
+	f, err := Parse([]byte(raw))
+	if err != nil || f.MadeBy != "0.14.0" || len(f.Sessions) != 1 {
+		t.Fatalf("Parse = %+v, %v", f, err)
+	}
+}

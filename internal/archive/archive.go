@@ -21,6 +21,7 @@ const Format = 1
 const (
 	ManifestName = "manifest.json"
 	DBName       = "sessionkeep.db"
+	oldDBName    = "devweft.db" // the name inside exports made before the program was renamed
 	SettingsName = "config.json"
 )
 
@@ -40,6 +41,7 @@ type Manifest struct {
 	Format        int             `json:"format"`
 	CreatedAt     string          `json:"created_at"`
 	Version       string          `json:"sessionkeep_version"`
+	OldVersion    string          `json:"devweft_version,omitempty"` // read from older exports; never written
 	SchemaVersion int             `json:"schema_version"`
 	SQLite        string          `json:"sqlite_version"`
 	Totals        json.RawMessage `json:"totals"`
@@ -142,15 +144,24 @@ func Extract(src, dir string) (Manifest, error) {
 		return m, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	defer zr.Close()
+	// An export made before the rename holds its database under the old name; it is read as
+	// if it had the new one.
+	current := func(name string) string {
+		if name == oldDBName {
+			return DBName
+		}
+		return name
+	}
 	entries := map[string]*zip.File{}
 	for _, f := range zr.File {
-		if f.Name != ManifestName && f.Name != DBName && f.Name != SettingsName {
+		name := current(f.Name)
+		if name != ManifestName && name != DBName && name != SettingsName {
 			return m, fmt.Errorf("%w: unexpected entry %q", ErrInvalid, f.Name)
 		}
-		if _, dup := entries[f.Name]; dup {
+		if _, dup := entries[name]; dup {
 			return m, fmt.Errorf("%w: entry %q appears twice", ErrInvalid, f.Name)
 		}
-		entries[f.Name] = f
+		entries[name] = f
 	}
 	mf, ok := entries[ManifestName]
 	if !ok || mf.UncompressedSize64 > 1<<20 {
@@ -168,8 +179,14 @@ func Extract(src, dir string) (Manifest, error) {
 	if m.Format != Format {
 		return m, fmt.Errorf("%w: export format %d is not supported by this version (expects %d)", ErrInvalid, m.Format, Format)
 	}
+	if m.Version == "" {
+		m.Version = m.OldVersion
+	}
+	m.OldVersion = ""
 	listed := map[string]File{}
-	for _, f := range m.Files {
+	for i, f := range m.Files {
+		f.Name = current(f.Name)
+		m.Files[i] = f
 		listed[f.Name] = f
 	}
 	if _, ok := listed[DBName]; !ok || len(listed) != len(entries)-1 {
