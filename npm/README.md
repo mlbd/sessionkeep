@@ -76,18 +76,20 @@ Cloudflare's own instructions: https://developers.cloudflare.com/r2/api/tokens/
 
 ### 2. On each computer: from the dashboard
 
-Run `sessionkeep dashboard` and open the address it prints.
+Run `sessionkeep dashboard` and open the address it prints. The menu on the left shows what
+applies to all projects (Overview, Projects, Search everything, Instructions for all, Settings,
+Health); opening a project switches it to that project's own pages.
 
-1. **Settings > Cloud storage for shared projects** has two parts, **Personal storage** and
+1. **Settings**, tab **Cloud storage**, has two parts, **Personal storage** and
    **Shared storage**. Set up the ones you use: the storage address (the endpoint above), the
    bucket name, both keys and your name. When it says the bucket answered, the storage is saved.
    Nothing is sent yet. The keys are kept protected on this computer and never shown again.
-2. **Projects**, on the project: **Share through the cloud**. Choose where it is kept (personal,
-   shared, or a bucket of its own, whose address and keys you then type in the same dialog), a
-   shared project name (lower-case letters, digits and dashes) and a passphrase of at least 8
-   characters. The first person makes the name and passphrase up.
-3. **Sync now** receives your colleagues' work and then sends yours. Sync only happens when you
-   press it. The project's panel says which storage and bucket it uses.
+2. Open the project (from **Projects** or the list in the menu), then its **Sharing** page.
+   Choose where it is kept (personal, shared, or a bucket of its own, whose address and keys you
+   then type on the same page), a shared project name (lower-case letters, digits and dashes)
+   and a passphrase of at least 8 characters. The first person makes the name and passphrase up.
+3. **Sync now** on the Sharing page receives your colleagues' work and then sends yours. Sync
+   only happens when you press it. The page says which storage and bucket the project uses.
 
 A colleague joins a project you share by doing the same on their computer with the **same
 bucket** (their own keys to it), the **same shared project name** and the **same passphrase**.
@@ -139,7 +141,7 @@ it; `sessionkeep team` lists every form.
   somewhere safe. To lock someone out of future work, delete their token and share again under
   a new shared name with a new passphrase. What they already received stays with them.
 - **If you forget a passphrase:** a computer still connected to the project keeps syncing with
-  the copy stored there, and can show it again: **Show passphrase** on the project (it asks
+  the copy stored there, and can show it again: **Show passphrase** on the project's Sharing page (it asks
   first) or `sessionkeep team passphrase --yes`. A colleague who shares the project can also
   tell you. If nobody has it any more, nothing can open the bundles already sent: there is no
   reset. Share the project again under a new shared name with a new passphrase; the first sync
