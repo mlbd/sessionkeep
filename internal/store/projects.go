@@ -123,6 +123,34 @@ func (s *Store) FindProject(ctx context.Context, deviceID, idOrRoot string) (Pro
 	return Project{}, ErrAmbiguousProject
 }
 
+// MoveRoot points one of a project's folders on this device at another place, and renames the
+// project when name is not empty. Both paths must already be normalized. Everything saved for
+// the project stays with it.
+func (s *Store) MoveRoot(ctx context.Context, projectID, deviceID, from, to, name string, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `update project_roots set normalized_path = ?, last_seen = ? where project_id = ? and device_id = ? and normalized_path = ?`,
+		to, now.UTC().Format(time.RFC3339), projectID, deviceID, from)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return fmt.Errorf("%w: %s", ErrRootRegistered, to)
+		}
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoProject
+	}
+	if name != "" {
+		if _, err := tx.ExecContext(ctx, `update projects set name = ? where id = ?`, name, projectID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SetCaptureLevel changes a project's capture level. The schema rejects unknown levels.
 func (s *Store) SetCaptureLevel(ctx context.Context, id, level string) error {
 	return s.updateProject(ctx, `update projects set capture_policy = ? where id = ?`, level, id)

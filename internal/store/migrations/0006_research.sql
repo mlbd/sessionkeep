@@ -1,6 +1,6 @@
 -- 0006: researched claims with checked sources (Phase 3, P3-01).
 -- A claim is a statement about the outside world (an API, a price, a limit). It is "verified"
--- only while it has at least one quote that SessionKeep itself found in a page it fetched; the
+-- only while it has at least one quote that DevWeft itself found in a page it fetched; the
 -- database refuses a verified claim without such a quote. "Stale" is never stored: it is worked
 -- out from expires_at when the claim is read, so reading can never make a claim look current.
 CREATE TABLE sources (

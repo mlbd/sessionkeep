@@ -56,6 +56,9 @@ Usage:
                                    latest sessions at every start, and with every request the
                                    stored pieces that share its words
   sessionkeep project capture ID_OR_PATH LEVEL
+  sessionkeep project move ID_OR_OLD_PATH NEW_PATH [--name NAME]
+                                   After you renamed or moved a project's folder: point the
+                                   project at the new place, so its saved sessions stay with it
   sessionkeep project which [PATH]     Show what SessionKeep would do in a folder (reads only)
   sessionkeep exclude add|remove PATH  Never capture, register or remind at or below PATH
   sessionkeep exclude list
@@ -677,9 +680,11 @@ func exclude(inv invocation, rest []string) error {
 	return inv.emit(st.settings.Exclusions, fmt.Sprintf("%s: %s\n", verb, path))
 }
 
+var errWhichFolder = errors.New("the project has several folders and none was named")
+
 func projectCmd(inv invocation, rest []string) error {
 	if len(rest) == 0 {
-		return usageErr("usage: sessionkeep project add|list|pause|resume|capture|which ...")
+		return usageErr("usage: sessionkeep project add|list|pause|resume|capture|move|which ...")
 	}
 	sub, args := rest[0], rest[1:]
 	switch sub {
@@ -797,6 +802,71 @@ func projectCmd(inv invocation, rest []string) error {
 			return err
 		}
 		return inv.emit(added, fmt.Sprintf("registered %s\nproject: %s\nlevel:   %s\n", root, added.ID, level))
+
+	case "move":
+		if err := inv.only("name"); err != nil {
+			return err
+		}
+		if len(args) != 2 {
+			return usageErr("usage: sessionkeep project move ID_OR_OLD_PATH NEW_PATH [--name NAME]")
+		}
+		abs, err := filepath.Abs(args[1])
+		if err != nil {
+			return usageErr("cannot resolve path %q: %v", args[1], err)
+		}
+		if fi, err := os.Stat(abs); err != nil || !fi.IsDir() {
+			return failErr("not_a_directory", "%s is not an existing directory (rename or move the folder first, then run this)", abs)
+		}
+		to, err := absNorm(abs)
+		if err != nil {
+			return err
+		}
+		st, err := load(inv, true)
+		if err != nil {
+			return err
+		}
+		if d := project.Decide(st.env(inv.getenv), st.settings, nil, abs); d.Reason == "excluded by the user" {
+			return failErr("excluded", "%s is inside an excluded folder; run `sessionkeep exclude remove` first", to)
+		}
+		old, _ := absNorm(args[0])
+		var after store.Project
+		from := ""
+		if err := withStore(st, func(ctx context.Context, s *store.Store) error {
+			p, err := s.FindProject(ctx, st.settings.DeviceID, args[0])
+			if errors.Is(err, store.ErrNoProject) && old != "" {
+				p, err = s.FindProject(ctx, st.settings.DeviceID, old)
+			}
+			if err != nil {
+				return err
+			}
+			for _, r := range p.Roots {
+				if r == old || len(p.Roots) == 1 {
+					from = r
+				}
+			}
+			if from == "" {
+				return errWhichFolder
+			}
+			if err := s.MoveRoot(ctx, p.ID, st.settings.DeviceID, from, to, inv.flags["name"], time.Now()); err != nil {
+				return err
+			}
+			after, err = s.FindProject(ctx, st.settings.DeviceID, p.ID)
+			return err
+		}); err != nil {
+			switch {
+			case errors.Is(err, errWhichFolder):
+				return failErr("which_folder", "this project has more than one folder on this computer; give the old folder's path instead of the id")
+			case errors.Is(err, store.ErrNoProject):
+				return failErr("no_such_project", "no project matches %q (use an id from `sessionkeep project list` or the folder's old path)", args[0])
+			case errors.Is(err, store.ErrAmbiguousProject):
+				return failErr("ambiguous_project", "%q matches more than one project; use more of the id", args[0])
+			case errors.Is(err, store.ErrRootRegistered):
+				return failErr("already_registered", "%s is already registered as a project of its own", to)
+			}
+			return err
+		}
+		return inv.emit(map[string]any{"project": after, "from": from, "to": to},
+			fmt.Sprintf("project %.8s (%s) now lives in %s\nwas:     %s\nEverything saved for it stays with it.\n", after.ID, after.Name, to, from))
 
 	case "pause", "resume", "capture", "recall":
 		if err := inv.only(); err != nil {
