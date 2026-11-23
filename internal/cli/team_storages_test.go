@@ -204,3 +204,45 @@ func TestEachProjectGoesToTheStorageChosenForIt(t *testing.T) {
 		t.Errorf("team list: %s", out)
 	}
 }
+
+// A project shared before storages could be saved gives the personal storage its bucket, and is
+// counted as using the personal storage, not as having a bucket of its own.
+func TestAProjectSharedEarlierCountsAsUsingThePersonalStorage(t *testing.T) {
+	f := s3lite.NewFake("AK", "SECRET")
+	srv := httptest.NewServer(f)
+	t.Cleanup(srv.Close)
+	a := newSandbox(t)
+	own := a.dir("own")
+	a.ok("project", "add", own, "--capture", "conversation")
+	ba := signIn(t, a)
+	var r struct {
+		Error struct{ Code, Message string }
+	}
+	body := map[string]string{"project": own, "name": "side-project", "passphrase": "eight888", "storage": "custom",
+		"endpoint": srv.URL, "bucket": "mine", "access_key": "AK", "secret_key": "SECRET"}
+	if code := ba.do("POST", "/api/team/connect", body, nil, &r); code != http.StatusOK {
+		t.Fatalf("sharing through a bucket of its own: %d %+v", code, r.Error)
+	}
+	var o struct {
+		Data struct {
+			Storages map[string]struct {
+				Set, Saved bool
+				Bucket     string
+			}
+			Projects map[string]struct{ Storage string }
+		}
+	}
+	ba.do("GET", "/api/team/overview", nil, nil, &o)
+	p := o.Data.Storages["personal"]
+	if !p.Set || p.Saved || p.Bucket != "mine" {
+		t.Fatalf("the personal storage should be taken from the project: %+v", p)
+	}
+	for id, x := range o.Data.Projects {
+		if x.Storage != "personal" {
+			t.Errorf("project %s counted as %q, want personal", id, x.Storage)
+		}
+	}
+	if len(o.Data.Projects) != 1 {
+		t.Errorf("projects: %+v", o.Data.Projects)
+	}
+}

@@ -277,8 +277,17 @@ func teamList(inv invocation) error {
 	}
 	var b strings.Builder
 	storages := map[string]any{}
+	// Projects are counted against the storages in use, so the personal storage taken from a
+	// project connected earlier counts that project as its own rather than as a separate bucket.
+	inUse := map[string]team.Storage{}
+	for slot, s := range saved {
+		inUse[slot] = s
+	}
 	for _, slot := range []string{team.Personal, team.Shared} {
 		s, _, ok, isSaved, keyErr := team.GetStorage(st.paths, slot)
+		if ok {
+			inUse[slot] = s
+		}
 		storages[slot] = map[string]any{"set": ok, "saved": isSaved, "endpoint": s.Endpoint, "bucket": s.Bucket, "as": s.As, "keys_readable": keyErr == nil}
 		switch {
 		case !ok:
@@ -297,7 +306,7 @@ func teamList(inv invocation) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		c := conns[id]
-		slot := team.SlotOf(saved, c)
+		slot := team.SlotOf(inUse, c)
 		shared[id] = map[string]any{"name": c.Name, "storage": slot, "bucket": c.Bucket, "endpoint": c.Endpoint, "as": c.As, "connected_at": c.ConnectedAt}
 		fmt.Fprintf(&b, "  project %s is shared as %q in bucket %s (%s storage, since %.10s)\n", id, c.Name, c.Bucket, slot, c.ConnectedAt)
 	}

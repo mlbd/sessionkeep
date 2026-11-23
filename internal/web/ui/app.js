@@ -1416,11 +1416,18 @@ async function settingsCloud(box) {
   const storageCard = slot => {
     const s = team.storages[slot];
     const info = STORAGES[slot];
-    return el('section', { class: 'card' },
+    const row = (label, value, mono) => el('div', { class: 'kv' }, el('span', { class: 'quiet', text: label }), el('span', { class: mono ? 'mono' : '', text: value }));
+    const host = (s.endpoint || '').replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '');
+    return el('section', { class: 'card storagecard' },
       el('div', { class: 'between' }, el('h2', { text: info.title }), s.set ? chip('ok', 'Set up') : chip('', 'Not set up')),
       el('p', { class: 'quiet small', text: info.what }),
-      s.set ? el('p', {}, el('span', { class: 'mono', text: s.bucket }), el('span', { class: 'quiet small', text: ` at ${s.endpoint}. ${plural(used(slot), 'project is', 'projects are')} shared through it.` + (s.as ? ` Colleagues see you as "${s.as}".` : '') + (s.saved ? '' : ' Taken from a project connected earlier.') })) : null,
-      el('div', { class: 'row' }, btn(s.saved ? 'Change' : 'Set up', s.saved ? 'btn' : 'btn primary', () => cloudStorage(slot), `${s.saved ? 'Change' : 'Set up'} the ${info.title.toLowerCase()}`),
+      s.set ? el('div', { class: 'kvlist' },
+        row('Bucket', s.bucket, true),
+        row('Address', host, true),
+        row('Used by', plural(used(slot), 'project', 'projects')),
+        s.as ? row('Colleagues see you as', s.as) : null) : null,
+      s.set && !s.saved ? el('p', { class: 'quiet small', text: 'Found in a project you shared earlier, and used from there. Change saves it here with its own keys.' }) : null,
+      el('div', { class: 'row' }, btn(s.set ? 'Change' : 'Set up', s.set ? 'btn' : 'btn primary', () => cloudStorage(slot), `${s.set ? 'Change' : 'Set up'} the ${info.title.toLowerCase()}`),
         s.saved ? btn('Forget', 'btn', () => forgetStorage(slot), `Forget the ${info.title.toLowerCase()}`) : null));
   };
   box.append(el('p', { class: 'quiet small', text: 'Projects stay on this computer unless you turn sharing on for them, one by one, on each project’s Sharing page. A shared project goes to your personal storage unless you choose the shared storage or a bucket of its own; it is sent, encrypted, only when you press Sync now.' }),
