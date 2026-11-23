@@ -339,8 +339,6 @@ build the npm package with `bash scripts/npm-pack.sh VERSION all`.
 Precedence when documents disagree: the owner's newest decisions, then product requirements and
 security rules, then approved ADRs, then detailed contracts. Conflicts are recorded, not hidden.
 
-`_private/` holds private context and is never committed; inspect what is staged before any commit.
-
 ## Licence
 
 [MIT](LICENSE). Licences of the software compiled into the program are listed in

@@ -1,14 +1,38 @@
-# Security policy — pre-release draft
+# Security policy
 
-No supported public versions yet. The security model and release gates are specified in `docs/07-SECURITY_PRIVACY.md`. The product is intended to handle sensitive conversations and project data; assume any real-world capture/export can contain sensitive information and exercise caution. Testing should use local synthetic fixtures with explicit permission.
+SessionKeep stores what is said in Claude Code sessions, so a flaw in it can expose sensitive
+conversations, project details or keys. Reports are welcome and taken seriously.
+
+## Supported versions
+
+Only the latest version published on npm (`npm view sessionkeep version`) receives fixes.
+Update with `npm install -g sessionkeep`.
 
 ## Reporting a vulnerability
 
-Before public release, maintainers must configure a private GitHub security advisory channel or dedicated private security contact, test the reporting workflow, and publish supported versions and response expectations. Contact and response SLA are not yet established. Until configured, notify the project owner privately; do not disclose secrets, customer data, usable access credentials or exploit details in public issues. Provide affected version/commit, OS, scope, minimal safe reproduction, severity/impact and mitigation if known. Never test against other users or repositories without authorization.
+Please report privately, not in a public issue:
 
-## Security release checklist
+1. Open the repository's **Security** tab and choose **Report a vulnerability**
+   (GitHub private vulnerability reporting).
+2. Include the SessionKeep version (`sessionkeep version`), your operating system, what an
+   attacker could do, and the smallest safe way to reproduce it.
 
-- Authenticated loopback API, cross-project isolation, explicit capture and external-data consent, redaction/exclusion tests and documented limitations.
-- No credentials in logs/test artifacts, no automatic escalations in reviewers, no mandatory upload or telemetry.
-- Dependency/security/license inventory, signed release checks, upgrade rollback, verified archive/path safety, encrypted restore tests for sync module.
-- High/critical unresolved flaws block affected feature release; publish limitations for disabled or unsupported features. Follow coordinated disclosure and do not make unverifiable safety claims.
+Do not include real secrets, real conversation text or working credentials; made-up values are
+enough. Do not test against other people's computers, accounts or buckets.
+
+You can expect an acknowledgement within a week. Once a fix is published, the report can be
+disclosed; credit is given unless you prefer otherwise.
+
+## What SessionKeep is designed to guarantee
+
+- Nothing is captured in a folder until the user registers it with a capture level, and
+  excluded folders are never captured.
+- Secrets are redacted before anything is written to disk.
+- The dashboard listens on the loopback address only and requires a one-time sign-in link.
+- No telemetry and no network use by default. Summaries, web research and cloud sharing are off
+  until the user turns them on.
+- Shared bundles are encrypted on the sending computer with the project's passphrase
+  ([age](https://age-encryption.org)) before upload; storage keys are kept protected on the computer.
+
+A way around any of these is a vulnerability. The design and threat model are in
+[docs/07-SECURITY_PRIVACY.md](docs/07-SECURITY_PRIVACY.md).
