@@ -53,7 +53,17 @@ function say(text, kind = '') {
   notice.className = kind;
 }
 
-async function api(method, path, body) {
+// Each page shown gets a new number. A page that is still loading when another one is shown gets
+// no more answers to what it read, so it stops instead of drawing into the page now on screen.
+// Changes (anything but GET) always get their answer, and so does a read marked keep.
+let wantedPage = 0;
+async function api(method, path, body, keep) {
+  const page = wantedPage;
+  const r = await request(method, path, body);
+  return method === 'GET' && !keep && page !== wantedPage ? new Promise(() => {}) : r;
+}
+
+async function request(method, path, body) {
   const opt = { method, headers: {}, credentials: 'same-origin' };
   if (method !== 'GET') {
     opt.headers['X-SessionKeep-CSRF'] = csrf;
@@ -521,7 +531,7 @@ async function attention(status) {
 }
 
 async function healthBadge() {
-  const r = await api('GET', '/api/doctor');
+  const r = await api('GET', '/api/doctor', null, true);
   const failing = r.data ? r.data.checks.filter(c => c.status !== 'ok').length : 0;
   badge('n-health', failing, 'bad', `${failing} not working`);
 }
@@ -1263,7 +1273,7 @@ async function projectsAll() {
         el('td', {}, sh ? chip('accent', placeOf(sh)) : el('span', { class: 'quiet small', text: 'This computer only' })),
         el('td', { class: 'right' }, el('a', { class: 'btn', href: projectHref(p.id), text: 'Open', 'aria-label': `Open ${p.name}` })));
     })))) : noProjectsYet();
-  view.append(el('div', { class: 'stack' }, table, el('div', { class: 'pair' }, addCard, importCard)));
+  view.append(el('div', { class: 'stack' }, table, addCard, importCard));
 }
 
 // ---- Sharing (one project) ------------------------------------------------------------------
@@ -1539,6 +1549,7 @@ function paintSide(page) {
 }
 
 async function show(target, force) {
+  wantedPage++;
   if (!projects.length) await loadProjects();
   let path = String(target || '');
   const moved = translate(path);
@@ -1597,12 +1608,12 @@ document.addEventListener('keydown', e => {
 });
 
 (async () => {
-  const s = await api('GET', '/api/session');
+  const s = await api('GET', '/api/session', null, true);
   if (!s.ok) { title.textContent = 'Not signed in'; return say(problem(s), 'bad'); }
   csrf = s.data.csrf;
   $('version').textContent = s.data.version;
+  healthBadge();
   await loadTeam();
   await show(route(), true);
-  healthBadge();
-  if (current !== '*/overview') { const st = await api('GET', '/api/status'); if (st.ok) attention(st.data); }
+  if (current !== '*/overview') { const st = await api('GET', '/api/status', null, true); if (st.ok) attention(st.data); }
 })();
