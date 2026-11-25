@@ -3,6 +3,11 @@
 // Every git invocation uses --no-optional-locks so that even the index refresh `git status`
 // normally performs is skipped: SessionKeep must be able to look at a repository in the middle of
 // someone's work and leave no trace.
+//
+// Nor may reading a repository run a program named by the repository itself. A copied or
+// unzipped project can carry a .git/config that sets core.fsmonitor, a filter or textconv
+// driver, an external diff or signature checking, each of which makes git run a command; every
+// invocation switches those off (see guard and guarded).
 package gitstate
 
 import (
@@ -10,6 +15,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"os"
@@ -33,13 +39,98 @@ type State struct {
 	Dirty string `json:"dirty_digest,omitempty"`
 }
 
-func git(ctx context.Context, dir string, args ...string) ([]byte, error) {
+// guard switches off the settings with which a repository could make git run a program. An
+// empty core.fsmonitor means off in every git version; hooks do not run for the commands used
+// here, and pointing them at the null device makes sure. Filter and diff drivers have names, so
+// guarded switches them off one by one.
+var guard = []string{
+	"-c", "core.fsmonitor=",
+	"-c", "core.hooksPath=" + os.DevNull,
+	"-c", "diff.external=",
+	"-c", "log.showSignature=false",
+}
+
+// errUnusualSettings is returned when a repository names a filter or diff driver that cannot be
+// switched off on git's command line.
+var errUnusualSettings = errors.New("this repository's git settings name a filter that SessionKeep cannot switch off, so its files were not read")
+
+func gitRun(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
 	cmd.Env = append(cmd.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
 	return out.Bytes(), err
+}
+
+// repo runs git in one folder with the guard and the overrides for that repository's drivers.
+type repo struct {
+	dir  string
+	args []string
+}
+
+func (r repo) git(ctx context.Context, args ...string) ([]byte, error) {
+	return gitRun(ctx, r.dir, append(append([]string{}, r.args...), args...)...)
+}
+
+// guarded prepares git for dir. Every filter driver (clean, smudge, process) and diff driver
+// (textconv, command) that the repository's own settings define is overridden with an empty
+// command. Drivers from the user's global or system settings, such as Git LFS, are left alone:
+// the user installed those. Reading settings runs nothing.
+func guarded(ctx context.Context, dir string) (repo, error) {
+	r := repo{dir: dir, args: guard}
+	const drivers = `^(filter|diff)\.`
+	out, err := r.git(ctx, "config", "-z", "--show-scope", "--get-regexp", drivers)
+	scoped := true
+	if err != nil && !noMatch(err) {
+		// git before 2.26 has no --show-scope: then every driver is switched off.
+		scoped = false
+		if out, err = r.git(ctx, "config", "-z", "--get-regexp", drivers); err != nil && !noMatch(err) {
+			return r, fmt.Errorf("could not read the repository's git settings: %w", err)
+		}
+	}
+	seen := map[string]bool{}
+	entries := bytes.Split(out, []byte{0})
+	for i := 0; i < len(entries); i++ {
+		scope := "local"
+		if scoped {
+			scope = string(entries[i])
+			if i++; i >= len(entries) {
+				break
+			}
+		}
+		key, _, _ := strings.Cut(string(entries[i]), "\n")
+		if key == "" || scope == "global" || scope == "system" {
+			continue
+		}
+		section, rest, _ := strings.Cut(key, ".")
+		dot := strings.LastIndex(rest, ".")
+		if dot <= 0 {
+			continue // a variable directly under filter or diff is not a driver
+		}
+		name := rest[:dot]
+		if strings.ContainsAny(name, "=\n") {
+			return r, errUnusualSettings
+		}
+		if seen[section+"."+name] {
+			continue
+		}
+		seen[section+"."+name] = true
+		vars := []string{"textconv=", "command="}
+		if section == "filter" {
+			vars = []string{"clean=", "smudge=", "process=", "required=false"}
+		}
+		for _, v := range vars {
+			r.args = append(r.args, "-c", section+"."+name+"."+v)
+		}
+	}
+	return r, nil
+}
+
+// noMatch reports git config's exit status 1, which means nothing matched.
+func noMatch(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 1
 }
 
 // Read inspects dir. It never returns an error: anything that prevents reading becomes Reason.
@@ -49,19 +140,26 @@ func Read(dir string) State {
 	if _, err := exec.LookPath("git"); err != nil {
 		return State{Reason: "git is not installed or not on PATH"}
 	}
-	if out, err := git(ctx, dir, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(string(out)) != "true" {
+	g := repo{dir: dir, args: guard}
+	if out, err := g.git(ctx, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(string(out)) != "true" {
 		return State{Reason: "not a Git repository"}
 	}
 	s := State{Repo: true}
-	if out, err := git(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+	if out, err := g.git(ctx, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
 		s.Branch = strings.TrimSpace(string(out))
-	} else if out, err := git(ctx, dir, "symbolic-ref", "--short", "HEAD"); err == nil {
+	} else if out, err := g.git(ctx, "symbolic-ref", "--short", "HEAD"); err == nil {
 		s.Branch = strings.TrimSpace(string(out)) // a repository with no commit yet
 	}
-	if out, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
+	if out, err := g.git(ctx, "rev-parse", "--verify", "--quiet", "HEAD"); err == nil {
 		s.Head = strings.TrimSpace(string(out))
 	}
-	status, err := git(ctx, dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	g, err := guarded(ctx, dir)
+	if err != nil {
+		s.Reason = err.Error() + "; uncommitted state unknown"
+		return s
+	}
+	// Submodules are not entered: their own settings are not checked here.
+	status, err := g.git(ctx, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all")
 	if err != nil {
 		s.Reason = "git status failed; uncommitted state unknown"
 		return s
@@ -75,10 +173,10 @@ func Read(dir string) State {
 		h := sha256.New()
 		h.Write(status)
 		if s.Head != "" {
-			diff, _ := git(ctx, dir, "diff", "--no-ext-diff", "--no-textconv", "HEAD")
+			diff, _ := g.git(ctx, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "HEAD")
 			h.Write(diff)
 		}
-		hashUntracked(ctx, dir, h)
+		hashUntracked(ctx, g, h)
 		s.Dirty = hex.EncodeToString(h.Sum(nil))
 	}
 	return s
@@ -93,13 +191,13 @@ const (
 
 // hashUntracked adds the content of untracked, non-ignored files to h. `git diff` does not cover
 // them, and "I rewrote the new file" is exactly the kind of change a checkpoint must notice.
-func hashUntracked(ctx context.Context, dir string, h hash.Hash) {
-	top, err := git(ctx, dir, "rev-parse", "--show-toplevel")
+func hashUntracked(ctx context.Context, g repo, h hash.Hash) {
+	top, err := g.git(ctx, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return
 	}
 	root := strings.TrimSpace(string(top))
-	list, err := git(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
+	list, err := repo{dir: root, args: g.args}.git(ctx, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return
 	}
@@ -184,7 +282,8 @@ func Commits(dir string, since, until time.Time, limit int) []Commit {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out := []Commit{}
-	raw, err := git(ctx, dir, "log", "--no-merges", fmt.Sprintf("--max-count=%d", limit*4),
+	g := repo{dir: dir, args: guard}
+	raw, err := g.git(ctx, "log", "--no-merges", "--no-show-signature", fmt.Sprintf("--max-count=%d", limit*4),
 		"--since="+since.Add(-time.Second).UTC().Format(time.RFC3339), "--until="+until.UTC().Format(time.RFC3339), "--format=%h%x09%cI%x09%s")
 	if err != nil {
 		return out
@@ -211,7 +310,11 @@ func Commits(dir string, since, until time.Time, limit int) []Commit {
 func CommitInfo(dir, rev string) (Commit, []string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	raw, err := git(ctx, dir, "show", "--no-patch", "--format=%h%x09%cI%x09%s", "--end-of-options", rev+"^{commit}")
+	g, err := guarded(ctx, dir)
+	if err != nil {
+		return Commit{}, nil, err
+	}
+	raw, err := g.git(ctx, "show", "--no-patch", "--no-show-signature", "--format=%h%x09%cI%x09%s", "--end-of-options", rev+"^{commit}")
 	if err != nil {
 		return Commit{}, nil, err
 	}
@@ -224,7 +327,7 @@ func CommitInfo(dir, rev string) (Commit, []string, error) {
 		return Commit{}, nil, err
 	}
 	c := Commit{ID: f[0], At: at.UTC().Format(time.RFC3339), Subject: f[2]}
-	names, err := git(ctx, dir, "show", "--no-renames", "--name-only", "--format=", "--end-of-options", rev+"^{commit}")
+	names, err := g.git(ctx, "show", "--no-renames", "--no-show-signature", "--name-only", "--format=", "--end-of-options", rev+"^{commit}")
 	if err != nil {
 		return c, nil, err
 	}
@@ -241,7 +344,11 @@ func CommitInfo(dir, rev string) (Commit, []string, error) {
 func BlameLine(dir, file string, line int) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	raw, err := git(ctx, dir, "blame", "--porcelain", fmt.Sprintf("-L%d,%d", line, line), "--", file)
+	g, err := guarded(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	raw, err := g.git(ctx, "blame", "--porcelain", "--no-textconv", fmt.Sprintf("-L%d,%d", line, line), "--", file)
 	if err != nil {
 		return "", err
 	}

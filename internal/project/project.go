@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -52,6 +53,7 @@ type Decision struct {
 //
 // Limits: it is lexical. It does not resolve symlinks, junctions or 8.3 short names, treats macOS
 // paths as case-sensitive, and uses Unicode lower-casing rather than NTFS's own case table.
+// Exclusions therefore also compare real locations (RealPath) and, on macOS, ignore case.
 func Normalize(goos, p string) (string, error) {
 	if strings.ContainsRune(p, 0) {
 		return "", errors.New("path contains a NUL byte")
@@ -145,6 +147,52 @@ type Env struct {
 	Home string // user's home directory, any form; never auto-registered
 	// RepoRoot returns the enclosing repository root for a directory, or "" if there is none.
 	RepoRoot func(dir string) string
+	// Real returns where a path really is, normalized, or "" when that cannot be found (RealPath).
+	// nil compares paths only as written.
+	Real func(path string) string
+}
+
+// RealPath returns the normalized real location of an existing path on this computer, with
+// junctions, symbolic links, mount points and 8.3 short names resolved, or "" when it cannot be
+// found. Exclusions use it so that no other name for an excluded folder gets around them.
+func RealPath(p string) string {
+	r, err := realPath(p)
+	if err != nil {
+		return ""
+	}
+	n, err := Normalize(runtime.GOOS, r)
+	if err != nil {
+		return ""
+	}
+	return n
+}
+
+// excludedBy reports whether normalized path p (dir as given) is at or below an exclusion. Both
+// sides are compared as written and, when real is set, at their real location; on macOS, whose
+// disks usually ignore letter case, case is ignored too. When in doubt, a folder is excluded.
+func excludedBy(goos string, exclusions []string, p, dir string, real func(string) string) bool {
+	paths := []string{p}
+	if real != nil && len(exclusions) > 0 {
+		if r := real(dir); r != "" && r != p {
+			paths = append(paths, r)
+		}
+	}
+	for _, ex := range exclusions {
+		forms := []string{ex}
+		if real != nil {
+			if r := real(ex); r != "" && r != ex {
+				forms = append(forms, r)
+			}
+		}
+		for _, a := range paths {
+			for _, b := range forms {
+				if within(goos, a, b) || (goos == "darwin" && within(goos, strings.ToLower(a), strings.ToLower(b))) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // Decide applies the rules in order: invalid path, exclusion, registered root, then the auto-add
@@ -154,10 +202,8 @@ func Decide(env Env, s config.Settings, roots []Root, cwd string) Decision {
 	if err != nil {
 		return Decision{Action: ActionNone, Reason: "working directory is not a usable absolute path"}
 	}
-	for _, ex := range s.Exclusions {
-		if within(env.GOOS, p, ex) {
-			return Decision{Action: ActionNone, Reason: "excluded by the user"}
-		}
+	if excludedBy(env.GOOS, s.Exclusions, p, cwd, env.Real) {
+		return Decision{Action: ActionNone, Reason: "excluded by the user"}
 	}
 	var best *Root
 	for i := range roots {
@@ -254,19 +300,19 @@ func ReadRootsCache(p config.Paths) ([]Root, error) {
 	return f.Roots, nil
 }
 
-// Excluded reports whether dir is at or below one of the user's excluded folders. A path that
-// cannot be normalized counts as excluded: when in doubt, keep nothing.
+// Excluded reports whether dir is at or below one of the user's excluded folders, under any name
+// (see excludedBy). Real locations are looked up when goos is this computer's. A path that cannot
+// be normalized counts as excluded: when in doubt, keep nothing.
 func Excluded(goos string, exclusions []string, dir string) bool {
 	p, err := Normalize(goos, dir)
 	if err != nil {
 		return true
 	}
-	for _, ex := range exclusions {
-		if within(goos, p, ex) {
-			return true
-		}
+	var real func(string) string
+	if goos == runtime.GOOS {
+		real = RealPath
 	}
-	return false
+	return excludedBy(goos, exclusions, p, dir, real)
 }
 
 func sameRoots(a, b []Root) bool {

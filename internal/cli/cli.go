@@ -551,7 +551,7 @@ func (st state) env(getenv func(string) string) project.Env {
 	if runtime.GOOS == "windows" {
 		home = getenv("USERPROFILE")
 	}
-	return project.Env{GOOS: runtime.GOOS, Home: home, RepoRoot: project.FindRepoRoot}
+	return project.Env{GOOS: runtime.GOOS, Home: home, RepoRoot: project.FindRepoRoot, Real: project.RealPath}
 }
 
 // absNorm turns a user-supplied path into the normalized comparison form.
