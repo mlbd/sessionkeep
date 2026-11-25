@@ -56,7 +56,7 @@ func Manifest(version string) map[string]any {
 		"version":     version,
 		"description": "Local-first developer memory: captures permitted conversation events for projects you registered.",
 		"author":      map[string]string{"name": "SessionKeep"},
-		"license":     "Apache-2.0",
+		"license":     "MIT",
 	}
 }
 

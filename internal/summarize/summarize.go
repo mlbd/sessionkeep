@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -124,8 +125,40 @@ func BuildInput(pieces []Piece) (string, int) {
 // Args is the argument list for the Claude Code program: print mode, the chosen model, every
 // customisation off (plugins, hooks, MCP servers, CLAUDE.md), no tools at all, nothing written
 // to the program's own session history, one JSON object as the answer.
+//
+// The model goes in one argument, --model=NAME, so that no name can be read as another option
+// (L11). --safe-mode already leaves out MCP servers; --strict-mcp-config makes sure of it.
 func Args(model string) []string {
-	return []string{"-p", "--model", model, "--safe-mode", "--tools", "", "--no-session-persistence", "--output-format", "json", "--system-prompt", System}
+	return []string{"-p", "--model=" + model, "--safe-mode", "--strict-mcp-config", "--tools", "", "--no-session-persistence", "--output-format", "json", "--system-prompt", System}
+}
+
+var modelForm = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]{0,127}$`)
+
+// ValidModel reports whether name looks like a model name or alias Claude Code accepts, such as
+// sonnet, claude-opus-5-5, opus[1m] or a cloud provider's model id.
+func ValidModel(name string) bool { return modelForm.MatchString(name) }
+
+// paidEnv names the settings that make Claude Code use an API key, a token or a cloud provider
+// account ahead of the plan the user signed in with. In `claude -p` an ANTHROPIC_API_KEY "is
+// always used when present" (code.claude.com/docs/en/authentication, "Authentication
+// precedence", read 2026-11-25), so a key set for some other tool would be billed for summaries
+// (L2). CLAUDE_CODE_OAUTH_TOKEN is a plan sign-in and is kept.
+var paidEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
+
+// PlanEnv returns env without the settings in paidEnv, so summaries are paid by the plan.
+func PlanEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+next:
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		for _, p := range paidEnv {
+			if strings.EqualFold(k, p) {
+				continue next
+			}
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // ParseResult reads the JSON object `claude -p --output-format json` prints. It returns the
@@ -175,7 +208,7 @@ func ClaudeCLI(bin, dir string, env []string) Runner {
 			return "", "", err
 		}
 		cmd.Dir = dir
-		cmd.Env = append(append([]string{}, env...), GuardEnv+"=1")
+		cmd.Env = append(PlanEnv(env), GuardEnv+"=1")
 		cmd.Stdin = strings.NewReader(input)
 		var out, errOut bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &errOut

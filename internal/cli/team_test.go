@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/handoff"
 	"sessionkeep/internal/s3lite"
+	"sessionkeep/internal/team"
 )
 
 // teamSandbox is a computer with its own data directory and the team's keys in its environment.
@@ -184,5 +186,65 @@ func TestTwoColleaguesExchangeAProjectThroughABucket(t *testing.T) {
 	a.ok("team", "disconnect", "--project", app, "--yes")
 	if code, _, _ := a.run("team", "status", "--project", app); code != ExitFailure {
 		t.Errorf("status after disconnecting: exit %d", code)
+	}
+}
+
+// Someone who can write to the bucket but has no passphrase puts bundles there whose names sort
+// last. A colleague can still connect and sync; the planted bundles are skipped, said so once and
+// not downloaded again; a wrong passphrase is still turned away (M5).
+func TestABundleThatDoesNotOpenDoesNotStopTheTeam(t *testing.T) {
+	fake := s3lite.NewFake("AK", "SYNTHETIC-SECRET-KEY")
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	const pass = "correct horse battery staple"
+	connect := func(sb *sandbox, dir, as string) (int, string, string) {
+		return sb.run("team", "connect", "--name", "shop-app", "--endpoint", srv.URL, "--bucket", "team-bucket", "--from", as, "--project", dir)
+	}
+
+	a := teamSandbox(t, pass)
+	app := a.dir("app")
+	a.ok("project", "add", app, "--capture", "conversation")
+	a.ok("checkpoint", "Done: totals PLANTCHECK", "--project", app)
+	if code, out, errOut := connect(a, app, "Sam"); code != ExitOK {
+		t.Fatalf("connect: %d %s %s", code, out, errOut)
+	}
+	a.ok("team", "push", "--project", app, "--yes")
+
+	locked, err := team.SealBundle(handoff.File{SourceDevice: "intruder"}, "not the team passphrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := "team-bucket/" + team.Prefix("shop-app")
+	// The locked one sorts last: connect used to try only the newest bundle.
+	fake.Objects[prefix+"99991231T235958Z-0000000000-junk.age"] = []byte("age-encryption.org/v1\nnot a bundle\n")
+	fake.Objects[prefix+"99991231T235959Z-0000000000-lock.age"] = locked
+
+	b := teamSandbox(t, pass)
+	theirs := b.dir("their-copy")
+	b.ok("project", "add", theirs, "--capture", "conversation")
+	if code, out, errOut := connect(b, theirs, "Kim"); code != ExitOK || !strings.Contains(out, "3 bundle(s) are there") {
+		t.Fatalf("a colleague with the right passphrase was kept out by planted bundles: exit %d\n%s%s", code, out, errOut)
+	}
+	out := b.ok("team", "sync", "--project", theirs, "--yes")
+	for _, want := range []string{"PLANTCHECK", "0000000000-lock.age does not open with this project's passphrase", "0000000000-junk.age is damaged or was altered", "RECEIVED:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the first sync lacks %q:\n%s", want, out)
+		}
+	}
+	out = b.ok("team", "sync", "--project", theirs, "--yes")
+	if strings.Contains(out, "Skipped: bundle") || !strings.Contains(out, "2 bundle(s) found earlier to be damaged or locked") {
+		t.Errorf("the second sync looked at the planted bundles again or did not say they are skipped:\n%s", out)
+	}
+	// Connecting again (perhaps with a corrected passphrase) looks at them again.
+	connect(b, theirs, "Kim")
+	if out := b.ok("team", "pull", "--project", theirs, "--yes"); !strings.Contains(out, "lock.age does not open") {
+		t.Errorf("after connecting again the planted bundles were not looked at again:\n%s", out)
+	}
+
+	c := teamSandbox(t, "a different passphrase")
+	third := c.dir("third")
+	c.ok("project", "add", third, "--capture", "conversation")
+	if code, _, errOut := connect(c, third, "Lee"); code != ExitFailure || !strings.Contains(errOut, "passphrase does not open") {
+		t.Errorf("a wrong passphrase connected: exit %d %q", code, errOut)
 	}
 }

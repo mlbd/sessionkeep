@@ -26,7 +26,8 @@ func TestWriteProducesExecFormHooksForEveryEvent(t *testing.T) {
 	}
 	var manifest map[string]any
 	raw, _ := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
-	if err := json.Unmarshal(raw, &manifest); err != nil || manifest["name"] != "sessionkeep" || manifest["version"] != "1.2.3" {
+	// The licence is the package's (MIT, LICENSE); it said Apache-2.0 until 0.17.1 (L12).
+	if err := json.Unmarshal(raw, &manifest); err != nil || manifest["name"] != "sessionkeep" || manifest["version"] != "1.2.3" || manifest["license"] != "MIT" {
 		t.Fatalf("manifest: %v %v", manifest, err)
 	}
 	var file struct {

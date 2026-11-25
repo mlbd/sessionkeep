@@ -17,6 +17,26 @@ function shouldRun(env) {
   return env.npm_config_global === 'true' && !env.SESSIONKEEP_SKIP_SETUP;
 }
 
+// setupEnv returns the environment for the setup program without the node_modules/.bin folders
+// npm puts in front of PATH for install scripts. Setup looks up `claude` by name, and on Windows
+// npm also adds C:\node_modules\.bin, a folder any signed-in user can create: a `claude.cmd`
+// planted there would run instead of Claude Code.
+function setupEnv(env, platform) {
+  const win = platform === 'win32';
+  const sep = win ? ';' : ':';
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase() !== 'PATH' || (!win && k !== 'PATH')) { out[k] = v; continue; }
+    out[k] = String(v).split(sep).filter((dir) => {
+      const parts = dir.replace(/[\\/]+$/, '').split(win ? /[\\/]/ : /\//);
+      const n = parts.length;
+      const name = (s) => (win ? String(s).toLowerCase() : s);
+      return !(n >= 2 && name(parts[n - 2]) === 'node_modules' && name(parts[n - 1]) === '.bin');
+    }).join(sep);
+  }
+  return out;
+}
+
 function main() {
   if (!shouldRun(process.env)) return;
   const program = bundled();
@@ -24,7 +44,7 @@ function main() {
   if (!program) {
     failure = `This package has no program for ${process.platform} ${process.arch}.`;
   } else {
-    const r = spawnSync(program, ['install', '--enable-plugin'], { encoding: 'utf8', windowsHide: true, timeout: 5 * 60 * 1000 });
+    const r = spawnSync(program, ['install', '--enable-plugin'], { encoding: 'utf8', windowsHide: true, timeout: 5 * 60 * 1000, env: setupEnv(process.env, process.platform) });
     const out = `${r.stdout || ''}${r.stderr || ''}`.trim();
     if (out) console.log(out);
     if (r.error) failure = r.error.message;
@@ -38,4 +58,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { shouldRun };
+module.exports = { shouldRun, setupEnv };

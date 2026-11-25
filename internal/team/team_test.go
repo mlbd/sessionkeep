@@ -108,3 +108,27 @@ func TestBundleNamesHideTheSharedNameAndSayWhoSent(t *testing.T) {
 		}
 	}
 }
+
+// A bundle whose header asks for a larger scrypt work factor than SessionKeep seals with is refused
+// as damaged before scrypt runs: someone who can write to the bucket cannot make opening it take
+// gigabytes of memory (M5). The header is edited, so the bundle would not open anyway; what
+// matters is that it is refused without the work.
+func TestABundleAskingForMoreWorkIsRefusedUnopened(t *testing.T) {
+	sealed, err := SealBundle(sample(), "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stanza := fmt.Sprintf(" %d\n", WorkFactor)
+	if !bytes.Contains(sealed, []byte(stanza)) {
+		t.Fatalf("the bundle is not sealed with work factor %d", WorkFactor)
+	}
+	heavier := bytes.Replace(sealed, []byte(stanza), []byte(fmt.Sprintf(" %d\n", WorkFactor+1)), 1)
+	start := time.Now()
+	_, err = OpenBundle(heavier, "correct horse battery")
+	if !errors.Is(err, handoff.ErrInvalid) || errors.Is(err, ErrPassphrase) {
+		t.Fatalf("a bundle asking for work factor %d: %v, want it refused as invalid", WorkFactor+1, err)
+	}
+	if d := time.Since(start); d > 300*time.Millisecond {
+		t.Errorf("refusing it took %v: scrypt ran", d)
+	}
+}

@@ -193,6 +193,9 @@ func summarizeCmd(inv invocation, rest []string) error {
 		next.Summaries.Enabled = true
 		next.Summaries.Auto = inv.flags["manual"] == ""
 		if v := inv.flags["model"]; v != "" {
+			if !summarize.ValidModel(v) {
+				return usageErr("--model must be a model name or alias such as sonnet or claude-sonnet-5-5 (letters, digits and . _ : @ / [ ] -, starting with a letter or digit); got %q", v)
+			}
 			next.Summaries.Model = v
 		}
 		if v := inv.flags["daily-limit"]; v != "" {

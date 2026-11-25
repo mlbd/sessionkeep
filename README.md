@@ -313,7 +313,7 @@ sessionkeep team list          # which storage each project uses
 
 ## Privacy and security in one list
 
-- Everything is stored in one SQLite database in your user folder (`sessionkeep paths` shows where).
+- Everything is stored in one SQLite database in your user folder (`sessionkeep paths` shows where). The database is not encrypted: it is protected by your account's file permissions, and full-disk encryption (BitLocker, FileVault, LUKS) protects it on a lost or stolen computer.
 - Secrets are redacted before they are written. Excluded folders are never captured.
 - No telemetry, no account, no SessionKeep server.
 - The dashboard listens on this computer only and needs a one-time sign-in link.

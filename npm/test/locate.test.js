@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { target, bundled, installDir, installed, choose } = require('../lib/locate');
-const { shouldRun } = require('../postinstall');
+const { shouldRun, setupEnv } = require('../postinstall');
 
 function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'sessionkeep-npm-')); }
 
@@ -73,4 +73,20 @@ test('setup runs only for a global install that was not told to skip it', () => 
   assert.strictEqual(shouldRun({}), false);
   assert.strictEqual(shouldRun({ npm_config_global: 'false' }), false);
   assert.strictEqual(shouldRun({ npm_config_global: 'true', SESSIONKEEP_SKIP_SETUP: '1' }), false);
+});
+
+test('setup never looks up claude in a node_modules/.bin folder npm put on PATH (M7)', () => {
+  const win = setupEnv({
+    Path: 'C:\\node_modules\\.bin;D:\\proj\\node_modules\\.bin\\;C:\\Program Files\\nodejs;C:\\Users\\u\\.local\\bin;;C:\\NODE_MODULES\\.BIN',
+    npm_config_global: 'true',
+  }, 'win32');
+  assert.strictEqual(win.Path, 'C:\\Program Files\\nodejs;C:\\Users\\u\\.local\\bin;');
+  assert.strictEqual(win.npm_config_global, 'true');
+
+  const unix = setupEnv({ PATH: '/home/u/node_modules/.bin:/usr/local/bin:/opt/node_modules/.bin/:/usr/bin', Path: '/x/node_modules/.bin' }, 'linux');
+  assert.strictEqual(unix.PATH, '/usr/local/bin:/usr/bin');
+  assert.strictEqual(unix.Path, '/x/node_modules/.bin', 'only PATH is a search path on Unix');
+
+  // A folder that merely contains the words is kept.
+  assert.strictEqual(setupEnv({ PATH: '/srv/node_modules/.bin/tools:/a/node_modules' }, 'linux').PATH, '/srv/node_modules/.bin/tools:/a/node_modules');
 });

@@ -55,7 +55,7 @@ func TestSystemPromptAndArgsAreSafeForACmdFile(t *testing.T) {
 		t.Errorf("the system prompt holds a character that is unsafe in a .cmd argument: %q", System)
 	}
 	a := strings.Join(Args("opus"), "\x00")
-	for _, want := range []string{"-p", "--model\x00opus", "--safe-mode", "--tools\x00\x00", "--no-session-persistence", "--output-format\x00json"} {
+	for _, want := range []string{"-p", "--model=opus", "--safe-mode", "--strict-mcp-config", "--tools\x00\x00", "--no-session-persistence", "--output-format\x00json"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("arguments lack %q: %q", want, Args("opus"))
 		}

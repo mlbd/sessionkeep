@@ -13,7 +13,7 @@ Assets: private project source, conversations, original instructions, research, 
 | Research -> network | consent, SSRF protections, TLS, limits, sanitized evidence; no private data in query by default |
 | Agent adapter -> subprocess | approved tool path and user identity, argv array, least privilege sandbox, no automatic escalation, safe logs |
 | Sync -> cloud | authenticated encryption before upload, explicit scope and provider credentials, versioned restore and tombstones |
-| Update -> binary | signed/checksummed releases, dependency audit and rollback; no executable download from untrusted repo |
+| Update -> binary | signed/checksummed releases, dependency audit and rollback; no executable download from untrusted repo (status 2026-11-25: not yet. Releases are packed and published by hand from the owner's computer, without provenance or published checksums; npm's registry hash is the only check) |
 
 ## Capture policy
 

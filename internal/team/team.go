@@ -95,6 +95,9 @@ type State struct {
 	Version int      `json:"version"`
 	Pushed  []string `json:"pushed"` // ids of instructions, checkpoints and pieces of text sent
 	Pulled  []string `json:"pulled"` // names of bundles received or known to be this computer's own
+	// Refused names bundles that did not open with this computer's passphrase or were damaged.
+	// They are not downloaded again until the project is connected again.
+	Refused []string `json:"refused,omitempty"`
 }
 
 // MinPassphrase is the shortest passphrase accepted. The passphrase is all that stands between
@@ -387,6 +390,11 @@ const MaxBundleBytes = 256 << 20
 // ErrPassphrase means a bundle could not be opened with the passphrase.
 var ErrPassphrase = errors.New("the passphrase does not open this bundle")
 
+// WorkFactor is the scrypt work factor (2^18, about 1 s and 256 MiB) bundles are sealed with, and
+// the largest one accepted when opening: a bundle put in the bucket by someone else cannot make
+// opening it cost more (age otherwise accepts 2^22, about 4 GiB).
+const WorkFactor = 18
+
 // SealBundle compresses f and encrypts it with the passphrase.
 func SealBundle(f handoff.File, passphrase string) ([]byte, error) {
 	f.Kind, f.Format = handoff.Kind, handoff.Format
@@ -398,6 +406,7 @@ func SealBundle(f handoff.File, passphrase string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	rec.SetWorkFactor(WorkFactor)
 	var out bytes.Buffer
 	enc, err := age.Encrypt(&out, rec)
 	if err != nil {
@@ -423,6 +432,7 @@ func OpenBundle(sealed []byte, passphrase string) (handoff.File, error) {
 	if err != nil {
 		return handoff.File{}, err
 	}
+	id.SetMaxWorkFactor(WorkFactor)
 	plain, err := age.Decrypt(bytes.NewReader(sealed), id)
 	if err != nil {
 		var none *age.NoIdentityMatchError

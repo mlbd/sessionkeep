@@ -48,6 +48,9 @@ var bucketForm = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
 const teamTimeout = 3 * time.Minute
 
+// connectTries is how many of the newest bundles connect tries to open with the passphrase.
+const connectTries = 8
+
 func teamClient(conn team.Connection, sec team.Secrets) *s3lite.Client {
 	return &s3lite.Client{Endpoint: conn.Endpoint, Bucket: conn.Bucket, Region: conn.Region, AccessKey: sec.AccessKey, SecretKey: sec.SecretKey}
 }
@@ -397,20 +400,40 @@ func teamConnect(inv invocation) error {
 	if err != nil {
 		return teamErr(err)
 	}
-	if len(there) > 0 {
-		raw, err := client.Get(ctx, there[len(there)-1].Key, team.MaxBundleBytes)
+	// The newest bundles are tried, up to connectTries, and one that opens is enough: a bundle
+	// someone without the passphrase put in the bucket must not keep a colleague out (M5).
+	locked := 0
+	for i := len(there) - 1; i >= 0 && len(there)-1-i < connectTries; i-- {
+		raw, err := client.Get(ctx, there[i].Key, team.MaxBundleBytes)
 		if err != nil {
 			return teamErr(err)
 		}
-		if _, err := team.OpenBundle(raw, sec.Passphrase); errors.Is(err, team.ErrPassphrase) {
-			return failErr("wrong_passphrase", "the bucket already holds %d bundle(s) under the shared name %q, and this passphrase does not open them; use the passphrase the team uses, or another shared name", len(there), name)
+		_, err = team.OpenBundle(raw, sec.Passphrase)
+		if err == nil {
+			locked = 0
+			break
 		}
+		if errors.Is(err, team.ErrPassphrase) {
+			locked++
+		}
+	}
+	if locked > 0 {
+		return failErr("wrong_passphrase", "the bucket already holds %d bundle(s) under the shared name %q, and this passphrase does not open any of the %d newest; use the passphrase the team uses, or another shared name", len(there), name, min(len(there), connectTries))
 	}
 	// A project that was shared somewhere else before starts over: what it sent there says
 	// nothing about what this place holds.
 	if old, _, was, _ := team.Get(st.paths, proj.ID); was && (old.Name != name || old.Endpoint != endpoint || old.Bucket != bucket) {
 		if err := team.Remove(st.paths, proj.ID); err != nil {
 			return err
+		}
+	} else if was {
+		// The same place, perhaps with another passphrase: bundles that did not open before are
+		// looked at again.
+		if known, err := team.LoadState(st.paths, proj.ID); err == nil && len(known.Refused) > 0 {
+			known.Refused = nil
+			if err := team.SaveState(st.paths, proj.ID, known); err != nil {
+				return err
+			}
 		}
 	}
 	if err := team.Put(st.paths, conn, sec); err != nil {
@@ -518,10 +541,20 @@ func teamPushStep(inv invocation, st state, proj store.Project, conn team.Connec
 }
 
 // teamWaiting downloads and opens the bundles this computer has not received. It returns the
-// opened files with their names, every name seen, and the names that could not be read.
-func teamWaiting(st state, proj store.Project, conn team.Connection, sec team.Secrets, known team.State) (files []handoff.File, keys, all, unreadable []string, err error) {
-	have := make(map[string]bool, len(known.Pulled))
+// opened files with their names, every name seen, the names of bundles found damaged and of
+// bundles the passphrase does not open on this look.
+//
+// One bundle that does not open must not stop the team's sync (M5): anyone who can write to the
+// bucket can put one there. Such bundles are skipped and remembered in known.Refused (saved here),
+// so they are not downloaded again. Only when no bundle opens and this computer has never sent or
+// received one under this connection is the passphrase taken to be wrong.
+func teamWaiting(st state, proj store.Project, conn team.Connection, sec team.Secrets, known *team.State) (files []handoff.File, keys, all, unreadable, locked []string, err error) {
+	have := make(map[string]bool, len(known.Pulled)+len(known.Refused))
+	used := len(known.Pulled) > 0
 	for _, k := range known.Pulled {
+		have[k] = true
+	}
+	for _, k := range known.Refused {
 		have[k] = true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), teamTimeout)
@@ -529,8 +562,10 @@ func teamWaiting(st state, proj store.Project, conn team.Connection, sec team.Se
 	client := teamClient(conn, sec)
 	there, err := client.List(ctx, team.Prefix(conn.Name))
 	if err != nil {
-		return nil, nil, nil, nil, teamErr(err)
+		return nil, nil, nil, nil, nil, teamErr(err)
 	}
+	opened := 0
+	var refused []string
 	for _, o := range there {
 		all = append(all, o.Key)
 		if have[o.Key] || team.SentBy(o.Key, st.settings.DeviceID) {
@@ -538,21 +573,34 @@ func teamWaiting(st state, proj store.Project, conn team.Connection, sec team.Se
 		}
 		raw, err := client.Get(ctx, o.Key, team.MaxBundleBytes)
 		if err != nil {
-			return nil, nil, nil, nil, teamErr(err)
+			return nil, nil, nil, nil, nil, teamErr(err)
 		}
 		f, err := team.OpenBundle(raw, sec.Passphrase)
+		short := o.Key[strings.LastIndex(o.Key, "/")+1:]
 		switch {
 		case errors.Is(err, team.ErrPassphrase):
-			return nil, nil, nil, nil, teamErr(err)
-		case err != nil:
-			unreadable = append(unreadable, o.Key[strings.LastIndex(o.Key, "/")+1:])
+			locked, refused = append(locked, short), append(refused, o.Key)
 			continue
-		case f.SourceDevice == st.settings.DeviceID:
+		case err != nil:
+			unreadable, refused = append(unreadable, short), append(refused, o.Key)
+			continue
+		}
+		opened++
+		if f.SourceDevice == st.settings.DeviceID {
 			continue
 		}
 		files, keys = append(files, f), append(keys, o.Key)
 	}
-	return files, keys, all, unreadable, nil
+	if len(locked) > 0 && opened == 0 && !used {
+		return nil, nil, nil, nil, nil, teamErr(team.ErrPassphrase)
+	}
+	if len(refused) > 0 {
+		known.Refused = uniqueSorted(append(known.Refused, refused...))
+		if err := team.SaveState(st.paths, proj.ID, *known); err != nil {
+			return nil, nil, nil, nil, nil, failErr("team_settings", "the record of bundles that do not open could not be saved: %v", err)
+		}
+	}
+	return files, keys, all, unreadable, locked, nil
 }
 
 func teamPull(inv invocation) error {
@@ -613,7 +661,7 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 	if err != nil {
 		return nil, "", false, failErr("team_settings", "%v", err)
 	}
-	files, keys, all, unreadable, err := teamWaiting(st, proj, conn, sec, known)
+	files, keys, all, unreadable, locked, err := teamWaiting(st, proj, conn, sec, &known)
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -637,11 +685,9 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 	}
 	sort.Strings(names)
 	out = map[string]any{"received": false, "project_id": proj.ID, "bucket": conn.Bucket, "bundles": len(files), "counts": total, "from": names,
-		"instructions": instructions, "checkpoints": checkpoints, "unreadable_bundles": unreadable, "sessions_taken": takesSessions(proj)}
+		"instructions": instructions, "checkpoints": checkpoints, "unreadable_bundles": unreadable, "locked_bundles": locked, "refused_bundles": len(known.Refused), "sessions_taken": takesSessions(proj)}
 	var b strings.Builder
-	for _, u := range unreadable {
-		fmt.Fprintf(&b, "Skipped: bundle %s is damaged or was altered, and nothing was taken from it.\n", u)
-	}
+	b.WriteString(refusedLines(unreadable, locked, len(known.Refused)))
 	if len(files) == 0 {
 		b.WriteString(fmt.Sprintf("Nothing new from the team for project %q.\n", proj.Name))
 		return out, b.String(), false, nil
@@ -687,6 +733,21 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 	return out, b.String(), false, nil
 }
 
+// refusedLines says which bundles were skipped on this look and how many are skipped in all.
+func refusedLines(damaged, locked []string, total int) string {
+	var b strings.Builder
+	for _, u := range damaged {
+		fmt.Fprintf(&b, "Skipped: bundle %s is damaged or was altered, and nothing was taken from it.\n", u)
+	}
+	for _, u := range locked {
+		fmt.Fprintf(&b, "Skipped: bundle %s does not open with this project's passphrase (a colleague used another passphrase, or someone without it put it in the bucket); nothing was taken from it.\n", u)
+	}
+	if earlier := total - len(damaged) - len(locked); earlier > 0 {
+		fmt.Fprintf(&b, "%d bundle(s) found earlier to be damaged or locked with another passphrase are skipped; connecting the project again looks at them again.\n", earlier)
+	}
+	return b.String()
+}
+
 func uniqueSorted(in []string) []string {
 	sort.Strings(in)
 	out := in[:0]
@@ -711,15 +772,15 @@ func teamStatus(inv invocation) error {
 	if err != nil {
 		return err
 	}
-	files, _, all, unreadable, err := teamWaiting(st, proj, conn, sec, known)
+	files, _, all, unreadable, locked, err := teamWaiting(st, proj, conn, sec, &known)
 	if err != nil {
 		return err
 	}
 	c := f.Count()
 	return inv.emit(map[string]any{"connected": true, "project_id": proj.ID, "name": conn.Name, "endpoint": conn.Endpoint, "bucket": conn.Bucket, "as": conn.As,
-		"keys_protected_by_os": keep.Protected, "to_send": c, "bundles_to_receive": len(files), "bundles_in_bucket": len(all), "unreadable_bundles": unreadable},
+		"keys_protected_by_os": keep.Protected, "to_send": c, "bundles_to_receive": len(files), "bundles_in_bucket": len(all), "unreadable_bundles": unreadable, "locked_bundles": locked, "refused_bundles": len(known.Refused)},
 		fmt.Sprintf("project %q is connected to bucket %s at %s as %q (connected %.10s).\nTo send: %d instruction(s), %d checkpoint(s), %d piece(s) of text in %d session(s).\nTo receive: %d bundle(s) from others; the bucket holds %d for this project in all.\n",
-			proj.Name, conn.Bucket, conn.Endpoint, conn.Name, conn.ConnectedAt, c.Instructions, c.Checkpoints, c.Turns, c.Sessions, len(files), len(all)))
+			proj.Name, conn.Bucket, conn.Endpoint, conn.Name, conn.ConnectedAt, c.Instructions, c.Checkpoints, c.Turns, c.Sessions, len(files), len(all))+refusedLines(unreadable, locked, len(known.Refused)))
 }
 
 // teamPassphrase shows the passphrase stored for a shared project, so that someone who forgot it

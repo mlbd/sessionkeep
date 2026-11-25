@@ -27,12 +27,20 @@ disclosed; credit is given unless you prefer otherwise.
 
 - Nothing is captured in a folder until the user registers it with a capture level, and
   excluded folders are never captured.
-- Secrets are redacted before anything is written to disk.
+- Secrets of known shapes (keys and tokens of common services, private keys, passwords in
+  connection strings, commands and `.env`-style names) are redacted before anything is written to
+  disk, and the output of a tool that read a file which commonly holds secrets (`.env`, key
+  files, credentials) is not kept. A secret with no label and no known shape can still be
+  stored; redaction is a safety net, not a guarantee.
 - The dashboard listens on the loopback address only and requires a one-time sign-in link.
 - No telemetry and no network use by default. Summaries, web research and cloud sharing are off
   until the user turns them on.
 - Shared bundles are encrypted on the sending computer with the project's passphrase
-  ([age](https://age-encryption.org)) before upload; storage keys are kept protected on the computer.
+  ([age](https://age-encryption.org)) before upload. Storage keys and passphrases are encrypted
+  for the signed-in Windows user (Data Protection API); on macOS and Linux they are kept as plain
+  text in a file only the user can read.
+- The local database is not encrypted. Anyone who can read the user's files, or a backup of
+  them, can read what was saved; full-disk encryption protects a lost or stolen computer.
 - An AI agent cannot approve a lasting change for the user. An instruction Claude saves, or one
   received from a teammate, is given to no session until the user approves it on the dashboard
   or in their own terminal; changing or deleting instructions and data, syncing, and turning on

@@ -37,12 +37,14 @@ type fakeCall struct {
 	Guard  string   `json:"guard"`
 	Cwd    string   `json:"cwd"`
 	Config string   `json:"config"`
+	Paid   string   `json:"paid"` // settings that would bill something other than the plan, as received
 }
 
 func fakeClaude(mode string) int {
 	in, _ := io.ReadAll(os.Stdin)
 	cwd, _ := os.Getwd()
-	line, _ := json.Marshal(fakeCall{Args: os.Args[1:], Stdin: string(in), Guard: os.Getenv(summarize.GuardEnv), Cwd: cwd, Config: os.Getenv("CLAUDE_CONFIG_DIR")})
+	line, _ := json.Marshal(fakeCall{Args: os.Args[1:], Stdin: string(in), Guard: os.Getenv(summarize.GuardEnv), Cwd: cwd, Config: os.Getenv("CLAUDE_CONFIG_DIR"),
+		Paid: os.Getenv("ANTHROPIC_API_KEY") + os.Getenv("ANTHROPIC_AUTH_TOKEN") + os.Getenv("CLAUDE_CODE_USE_BEDROCK")})
 	if f, err := os.OpenFile(os.Getenv("SESSIONKEEP_FAKE_LOG"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		f.Write(append(line, '\n'))
 		f.Close()
@@ -222,7 +224,7 @@ func TestSummariesStayOffUntilTheOwnerConfirms(t *testing.T) {
 	if n := len(calls()); n != 0 {
 		t.Fatalf("the program was started %d time(s) while summaries were off", n)
 	}
-	for _, bad := range [][]string{{"summarize"}, {"summarize", "on", "--model", "a b", "--yes"}, {"summarize", "on", "--daily-limit", "0", "--yes"}, {"summarize", "run", "--model", "opus"}, {"summarize", "nonsense"}} {
+	for _, bad := range [][]string{{"summarize"}, {"summarize", "on", "--model", "a b", "--yes"}, {"summarize", "on", "--model", "--dangerously-skip-permissions", "--yes"}, {"summarize", "on", "--model", "-p", "--yes"}, {"summarize", "on", "--daily-limit", "0", "--yes"}, {"summarize", "run", "--model", "opus"}, {"summarize", "nonsense"}} {
 		if code, _, _ := sb.run(bad...); code != ExitUsage {
 			t.Errorf("%v: exit %d, want usage", bad, code)
 		}
@@ -242,6 +244,10 @@ func TestSummarizeWritesOneSummaryPerFinishedSession(t *testing.T) {
 	sb.ok("ingest")
 	sb.ok("project", "pause", paused)
 	calls := sb.fakeProgram("ok")
+	// An API key set for some other tool must not pay for summaries (L2).
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-SYNTHETIC")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "SYNTHETIC-TOKEN")
+	t.Setenv("CLAUDE_CODE_USE_BEDROCK", "1")
 	sb.ok("summarize", "on", "--model", "opus", "--manual", "--yes")
 
 	// A dry run names the session and sends nothing.
@@ -258,7 +264,7 @@ func TestSummarizeWritesOneSummaryPerFinishedSession(t *testing.T) {
 	}
 	c := got[0]
 	args := strings.Join(c.Args, "\x00") + "\x00"
-	for _, want := range []string{"-p\x00", "--model\x00opus\x00", "--safe-mode\x00", "--tools\x00\x00", "--no-session-persistence\x00", "--output-format\x00json\x00", "--system-prompt\x00" + summarize.System + "\x00"} {
+	for _, want := range []string{"-p\x00", "--model=opus\x00", "--safe-mode\x00", "--strict-mcp-config\x00", "--tools\x00\x00", "--no-session-persistence\x00", "--output-format\x00json\x00", "--system-prompt\x00" + summarize.System + "\x00"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("the program did not receive %q; got %q", want, c.Args)
 		}
@@ -271,6 +277,9 @@ func TestSummarizeWritesOneSummaryPerFinishedSession(t *testing.T) {
 	}
 	if c.Guard != "1" || filepath.Base(c.Cwd) != "summarizer" {
 		t.Errorf("guard=%q cwd=%q; want the guard set and the empty start folder", c.Guard, c.Cwd)
+	}
+	if c.Paid != "" {
+		t.Errorf("the program received an API key, token or cloud provider switch: %q", c.Paid)
 	}
 
 	// The summary is stored with its model, redacted, and shown apart from the original text.
