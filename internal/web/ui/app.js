@@ -416,12 +416,14 @@ async function teamSync(p) {
   if (r.ok) return say(`${p.name} is in step: nothing to receive and nothing new to send.`, 'ok');
   if (r.status !== 409 || !r.data || !r.data.receive) return say(problem(r), 'bad');
   say('Nothing is received or sent yet.');
-  const get = r.data.receive, send = r.data.send, told = get.instructions || [];
+  const get = r.data.receive, send = r.data.send, told = get.instructions || [], notes = get.checkpoints || [];
   const toSend = send.counts.instructions + send.counts.checkpoints + send.counts.pieces_of_text;
   openDialog(`Sync ${p.name}?`, [
     el('p', {}, el('strong', { text: 'To receive: ' }), get.bundles ? `${countLine(get.counts)}, sent by ${(get.from || []).join(', ') || 'colleagues'}.` + (get.counts.sessions && !get.sessions_taken ? ' The sessions would be left out: this project is paused or does not save conversation text.' : '') : 'nothing new.'),
-    told.length ? el('p', { text: 'These received instructions would be given to Claude in every session of this project, as if you had recorded them. Read them:' }) : null,
+    told.length ? el('p', { text: 'These received instructions would wait for your approval under Instructions. None reaches Claude until you approve it:' }) : null,
     told.map(i => el('blockquote', { class: 'exact said', text: i.text })),
+    notes.length ? el('p', { text: 'Checkpoint notes. The newest is shown to Claude at the start of sessions, marked as your teammate’s:' }) : null,
+    notes.map(c => el('blockquote', { class: 'exact said', text: c.note })),
     el('p', {}, el('strong', { text: 'To send: ' }), toSend ? `${countLine(send.counts)}.` : 'nothing new.'),
     el('p', { class: 'quiet small', text: 'What you send is encrypted on this computer with the passphrase of this project before it leaves. Your folder paths are shortened and secrets are removed; other names or paths you typed in a conversation are not. It cannot be taken back from colleagues who received it.' }),
   ].flat().filter(Boolean), [
@@ -501,6 +503,15 @@ function noteParts(note) {
 async function attention(status) {
   const items = [], cps = [];
   let facts = 0;
+  // Instructions proposed by Claude or received from a teammate reach no session until approved.
+  const ins = await api('GET', '/api/instructions');
+  const waiting = ins.ok ? ins.data.filter(i => i.state === 'draft') : [];
+  if (waiting.length) {
+    const first = waiting[0];
+    items.push({ kind: 'warn', tag: 'Approve', title: `${plural(waiting.length, 'instruction waits', 'instructions wait')} for your approval`,
+      detail: 'Proposed by Claude in a session, or received from a teammate. None reaches Claude until you approve it.', action: 'Look at it',
+      href: first.scope === 'global' ? '#/instructions/' + first.id : projectHref(first.project_id, 'instructions', first.id) });
+  }
   if (status.spool_pending) {
     items.push({ kind: 'bad', tag: 'Not stored', title: `${plural(status.spool_pending, 'captured event is', 'captured events are')} not stored yet`,
       detail: `Waiting since ${nice(status.spool_oldest)}. They cannot be searched until they are stored.`, action: 'Store them now', primary: true,
@@ -959,6 +970,18 @@ async function searchView() {
 
 // ---- Instructions ---------------------------------------------------------------------------
 
+// Who wrote an instruction, in a sentence. A proposal from Claude may come from text Claude read,
+// so the person is told to approve only what they asked for.
+// A turned-down instruction was never approved: it stays archived and unconfirmed.
+const turnedDown = i => i.state === 'archived' && !i.approved;
+function authorLine(i) {
+  const a = String(i.author || ''), waiting = i.state === 'draft', no = turnedDown(i);
+  if (a === 'claude') return waiting ? 'Proposed by Claude in a session. Approve it only if you asked Claude to remember this.' : no ? 'Proposed by Claude, turned down by you. Claude never received it.' : 'Proposed by Claude, approved by you.';
+  if (a === 'handoff') return waiting ? 'Received from a teammate.' : no ? 'Received from a teammate, turned down by you. Claude never received it.' : 'Received from a teammate, approved by you.';
+  if (a.startsWith('received:')) return `Received from ${a.slice(9) || 'a teammate'} through sharing.` + (waiting ? ' Approve it only if you want Claude to follow it in every session.' : no ? ' Turned down by you. Claude never received it.' : ' Approved by you.');
+  return 'Written by you.';
+}
+
 async function instructionsView(sel) {
   await loadProjects();
   const r = await api('GET', '/api/instructions?all=1');
@@ -966,9 +989,19 @@ async function instructionsView(sel) {
   const mine = r.data.filter(i => scope === '*' ? i.scope === 'global' : i.scope !== 'global' && i.project_id === scope);
   const globalCount = r.data.filter(i => i.scope === 'global' && i.state === 'active').length;
   if (scope !== '*') lede.textContent = `Claude receives these word for word at the start of every session in ${scopeName()}. It also gets ${plural(globalCount, 'instruction', 'instructions')} for all projects.`;
-  const active = mine.filter(i => i.state === 'active'), retired = mine.filter(i => i.state !== 'active');
+  // Waiting: proposed by Claude in a session, or received from a teammate. Nothing reaches
+  // Claude until it is approved here.
+  const active = mine.filter(i => i.state === 'active'), waiting = mine.filter(i => i.state === 'draft'), retired = mine.filter(i => i.state === 'archived');
   const where = i => i.scope === 'global' ? 'every project' : projectName(i.project_id);
-  let tab = sel && retired.some(i => i.id === sel) ? 'retired' : 'active';
+  let tab = sel && retired.some(i => i.id === sel) ? 'retired' : (sel && active.some(i => i.id === sel)) || !waiting.length ? 'active' : 'waiting';
+  const stateWord = i => i.state === 'active' ? 'In use' : i.state === 'draft' ? 'Waiting for your approval' : turnedDown(i) ? 'Turned down' : 'Retired';
+  const stateChip = i => chip(i.state === 'active' ? 'accent' : i.state === 'draft' ? 'warn' : '', stateWord(i));
+  const decide = async (i, action) => {
+    const res = await api('POST', `/api/instructions/${i.id}/${action}`, { confirm: true });
+    if (!res.ok) return say(problem(res), 'bad');
+    await reload();
+    say(action === 'approve' ? 'Approved. Claude gets it from the next session.' : 'Turned down. Claude never gets it.', 'ok');
+  };
   const list = el('div', { class: 'col-list' });
   const pane = el('div', { class: 'col-detail', 'aria-live': 'polite' });
 
@@ -992,17 +1025,20 @@ async function instructionsView(sel) {
     const i = mine.find(x => x.id === id);
     if (!i) return pane.replaceChildren();
     const work = el('div', {}), earlier = el('div', {}, working('Reading the earlier wording.'));
+    const draft = i.state === 'draft';
     pane.replaceChildren(el('section', { class: 'card' },
-      el('div', { class: 'row' }, i.state === 'active' ? chip('accent', 'In use') : chip('', 'Retired'), chip('plain', i.scope === 'global' ? 'every project' : where(i) + ' only')),
-      el('div', {}, el('h3', { text: 'Exact words Claude receives' }), el('blockquote', { class: 'exact said', text: i.text })),
+      el('div', { class: 'row' }, stateChip(i), chip('plain', i.scope === 'global' ? 'every project' : where(i) + ' only')),
+      el('p', { class: 'quiet small', text: authorLine(i) }),
+      el('div', {}, el('h3', { text: draft ? 'Exact words Claude would receive' : i.state === 'active' ? 'Exact words Claude receives' : 'Exact words' }), el('blockquote', { class: 'exact said', text: i.text })),
+      draft ? el('div', { class: 'row' }, btn('Approve', 'btn primary', () => decide(i, 'approve')), btn('Turn down', 'btn', () => decide(i, 'reject'))) : null,
       i.state === 'active' ? el('div', { class: 'row' }, btn('Change the wording', 'btn', () => change(i, 'supersede', work)), btn('Retire this instruction', 'btn', () => change(i, 'archive', work))) : null,
       work, earlier));
     const h = await api('GET', `/api/instructions/${id}`);
     if (!earlier.isConnected) return;
     if (!h.ok) return earlier.replaceChildren(el('p', { class: 'quiet', text: problem(h) }));
     earlier.replaceChildren(el('h3', { text: 'Wording over time' }), el('ol', { class: 'timeline' }, h.data.versions.map(v => el('li', {},
-      el('p', { class: 'quiet small', text: `${when(v.created_at)}, ${v.status === 'active' ? 'in use now' : v.status === 'superseded' ? 'replaced' : 'retired'}` }),
-      el('p', { class: (v.status === 'active' ? 'cur' : 'old') + ' said', text: v.text }),
+      el('p', { class: 'quiet small', text: `${when(v.created_at)}, ${v.status === 'active' ? 'in use now' : v.status === 'draft' ? 'waiting for your approval' : v.status === 'superseded' ? 'replaced' : turnedDown(i) ? 'turned down' : 'retired'}` }),
+      el('p', { class: (v.status === 'active' || v.status === 'draft' ? 'cur' : 'old') + ' said', text: v.text }),
       v.reason ? el('p', { class: 'small', text: 'Reason: ' + v.reason }) : null))));
   };
 
@@ -1034,13 +1070,14 @@ async function instructionsView(sel) {
   };
 
   const paint = () => {
-    const rows = tab === 'active' ? active : retired;
-    list.replaceChildren(seg('Which instructions', [['active', `In use (${active.length})`], ['retired', `Retired (${retired.length})`]], tab, v => { tab = v; paint(); }, 'tabs'),
+    const rows = { active, waiting, retired }[tab];
+    const tabs = (waiting.length ? [['waiting', `Waiting for you (${waiting.length})`]] : []).concat([['active', `In use (${active.length})`], ['retired', `Retired (${retired.length})`]]);
+    list.replaceChildren(seg('Which instructions', tabs, tab, v => { tab = v; paint(); }, 'tabs'),
       ...(rows.length ? rows.map(i => el('a', { class: 'pick boxed', href: (scope === '*' ? '#/instructions/' : projectHref(scope, 'instructions') + '/') + i.id, 'data-id': i.id },
         el('span', { class: 'main', text: i.text }),
-        el('span', { class: 'sub' }, el('span', { class: 'mono', text: where(i) }), el('span', { text: i.state === 'active' ? 'In use' : 'Retired' }),
+        el('span', { class: 'sub' }, el('span', { class: 'mono', text: where(i) }), el('span', { text: stateWord(i) }),
           el('span', { text: i.revision > 1 ? plural(i.revision - 1, 'earlier wording', 'earlier wordings') : 'Never changed' }))))
-        : [el('p', { class: 'quiet', text: tab === 'active' ? 'No instructions yet. Add one, or tell Claude "remember that..." in a session.' : 'Nothing has been retired.' })]));
+        : [el('p', { class: 'quiet', text: tab === 'active' ? 'No instructions yet. Add one, or tell Claude "remember that..." in a session.' : tab === 'waiting' ? 'Nothing waits for your approval.' : 'Nothing has been retired.' })]));
     const first = rows.find(i => i.id === sel) || rows[0];
     if (first) { mark(list, first.id); detail(first.id); } else pane.replaceChildren();
   };
@@ -1063,7 +1100,14 @@ async function instructionsView(sel) {
   actions.append(btn('Things you repeat', 'btn', repeated), btn('Add an instruction', 'primary', () => add()));
   view.append(el('div', { class: 'cols' }, list, pane));
   paint();
-  selectors.instructions = args => { if (!args[0] || !mine.some(i => i.id === args[0])) return false; sel = args[0]; mark(list, sel); detail(sel); return true; };
+  selectors.instructions = args => {
+    const i = args[0] && mine.find(x => x.id === args[0]);
+    if (!i) return false;
+    sel = i.id;
+    const t = i.state === 'active' ? 'active' : i.state === 'draft' ? 'waiting' : 'retired';
+    if (t !== tab) { tab = t; paint(); } else { mark(list, sel); detail(sel); }
+    return true;
+  };
 }
 
 // ---- Research -------------------------------------------------------------------------------

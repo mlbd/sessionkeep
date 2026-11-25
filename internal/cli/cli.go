@@ -85,6 +85,11 @@ Usage:
   sessionkeep remember "TEXT" --scope global|project [--project ID_OR_PATH] [--yes]
                                    Record a standing instruction, word for word. Without --yes it
                                    only shows what would be saved. TEXT may be - to read stdin.
+                                   Run by an AI agent (Claude Code), --yes only saves it for your
+                                   approval; it is used once you approve it on the dashboard.
+                                   Agents also cannot change, retire or approve instructions,
+                                   delete data, sync or turn on summaries, fetching or automatic
+                                   recall: you do those on the dashboard or in your own terminal
   sessionkeep suggest [--project ID_OR_PATH | --all-projects]
                                    Requests you made in nearly the same words in three or more
                                    sessions and that no instruction covers. Found by comparing
@@ -92,6 +97,9 @@ Usage:
   sessionkeep instruction list [--all] | show ID
   sessionkeep instruction supersede ID "TEXT" [--reason R] [--yes]
   sessionkeep instruction archive ID [--reason R] [--yes]
+  sessionkeep instruction approve ID [--yes] | reject ID [--reason R] [--yes]
+                                   Approve or turn down an instruction waiting for approval
+                                   (proposed by Claude, or received from a teammate)
   sessionkeep plugin write DIR [--with-mcp]
                                    Generate the Claude Code plugin directory for this binary;
                                    --with-mcp also registers the optional MCP server
@@ -188,11 +196,18 @@ type invocation struct {
 	stdin  io.Reader
 	stdout io.Writer
 	getenv func(string) string
+	person bool // started by the person through the dashboard, never by an agent (see byAgent)
 }
 
 // Run executes one command and returns the process exit status. Results go to stdout,
 // diagnostics to stderr; with --json, errors are also a JSON envelope on stdout.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
+	return execute(args, stdin, stdout, stderr, getenv, false)
+}
+
+// execute runs one command; person says it comes from the dashboard, where only the person who
+// opened the one-time sign-in link can press a button.
+func execute(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string, person bool) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return ExitUsage
@@ -217,8 +232,10 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 	}
 	inv, err := parse(args, "auto-add", "level", "capture", "name", "scope", "project", "reason", "who", "since", "until", "limit", "offset", "cursor", "from", "model", "daily-limit", "subject", "category", "applies-to", "url", "quote", "find", "supersedes", "endpoint", "bucket", "region", "storage")
 	if err == nil {
-		inv.stdin, inv.stdout, inv.getenv = stdin, stdout, getenv
-		err = dispatch(inv)
+		inv.stdin, inv.stdout, inv.getenv, inv.person = stdin, stdout, getenv, person
+		if err = agentGate(inv); err == nil {
+			err = dispatch(inv)
+		}
 	}
 	if err == nil {
 		return ExitOK
@@ -1390,7 +1407,8 @@ func readText(inv invocation, arg string) (string, error) {
 }
 
 // remember records a standing instruction. Scope has no default, and nothing is saved without
-// --yes: the first run shows exactly what would be stored and where it would apply.
+// --yes: the first run shows exactly what would be stored and where it would apply. An agent's
+// --yes saves it as a proposal, which no session gets until the person approves it.
 func remember(inv invocation, rest []string) error {
 	if err := inv.only("scope", "project", "yes"); err != nil {
 		return err
@@ -1415,6 +1433,7 @@ func remember(inv invocation, rest []string) error {
 	}
 	var saved store.Instruction
 	var target store.Project
+	proposed := inv.byAgent()
 	err = withStore(st, func(ctx context.Context, s *store.Store) error {
 		if scope == "project" {
 			if target, err = resolveProject(ctx, inv, st, s, inv.flags["project"]); err != nil {
@@ -1424,7 +1443,13 @@ func remember(inv invocation, rest []string) error {
 		if inv.flags["yes"] == "" {
 			return nil
 		}
-		saved, err = s.AddInstruction(ctx, store.NewInstruction{ID: config.NewID(), VersionID: config.NewID(), Scope: scope, ProjectID: target.ID, Text: text, Author: "owner", Now: time.Now()})
+		n := store.NewInstruction{ID: config.NewID(), VersionID: config.NewID(), Scope: scope, ProjectID: target.ID, Text: text, Author: store.AuthorOwner, Now: time.Now()}
+		if proposed {
+			n.Author = store.AuthorClaude
+			saved, err = s.ProposeInstruction(ctx, n)
+			return err
+		}
+		saved, err = s.AddInstruction(ctx, n)
 		return err
 	})
 	if errors.Is(err, store.ErrDuplicateInstruction) {
@@ -1438,11 +1463,32 @@ func remember(inv invocation, rest []string) error {
 		where = fmt.Sprintf("project %q (%.8s)", target.Name, target.ID)
 	}
 	if inv.flags["yes"] == "" {
+		next := "Run the same command with --yes to record it.\n"
+		if proposed {
+			next = "Run the same command with --yes to save it for the user's approval; it is not given to any session until they approve it on the dashboard.\n"
+		}
 		inv.emit(map[string]any{"saved": false, "scope": scope, "project_id": target.ID, "text": text},
-			fmt.Sprintf("NOT SAVED YET. This would be recorded word for word:\n----\n%s\n----\napplies to: %s\nRun the same command with --yes to record it.\n", text, where))
+			fmt.Sprintf("NOT SAVED YET. This would be recorded word for word:\n----\n%s\n----\napplies to: %s\n%s", text, where, next))
 		return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was saved; add --yes to record exactly this text"}
 	}
+	if proposed {
+		return inv.emit(saved, fmt.Sprintf("SAVED FOR THE USER'S APPROVAL as instruction %.8s; it is not in use yet.\napplies to: %s\n"+
+			"Tell the user: it is given to sessions only after they approve it on the dashboard, under Instructions (start it with: sessionkeep dashboard).\n", saved.ID, where))
+	}
 	return inv.emit(saved, fmt.Sprintf("recorded instruction %.8s (revision 1)\napplies to: %s\nit will be given to new sessions from now on\n", saved.ID, where))
+}
+
+// authorWords says in plain words who wrote an instruction.
+func authorWords(author string) string {
+	switch {
+	case author == store.AuthorClaude:
+		return "proposed by Claude"
+	case author == store.AuthorHandoff:
+		return "received from a teammate"
+	case strings.HasPrefix(author, store.AuthorReceived):
+		return "received from " + strings.TrimPrefix(author, store.AuthorReceived)
+	}
+	return "the user"
 }
 
 // resolveProject finds a project by id, id prefix or folder; with no key it uses the current
@@ -1481,7 +1527,7 @@ func resolveProject(ctx context.Context, inv invocation, st state, s *store.Stor
 
 func instructionCmd(inv invocation, rest []string) error {
 	if len(rest) == 0 {
-		return usageErr("usage: sessionkeep instruction list [--all] | show ID | supersede ID \"TEXT\" [--reason R] [--yes] | archive ID [--reason R] [--yes]")
+		return usageErr("usage: sessionkeep instruction list [--all] | show ID | supersede ID \"TEXT\" [--reason R] [--yes] | archive ID [--reason R] [--yes] | approve ID [--yes] | reject ID [--reason R] [--yes]")
 	}
 	sub, args := rest[0], rest[1:]
 	st, err := load(inv, true)
@@ -1497,11 +1543,53 @@ func instructionCmd(inv invocation, rest []string) error {
 		case errors.Is(err, store.ErrNotActive):
 			return failErr("not_active", "instruction %q is archived and cannot be changed", key)
 		case errors.Is(err, store.ErrDuplicateInstruction):
-			return failErr("duplicate", "the new text is identical to the current text")
+			return failErr("duplicate", "the same text is already in use there")
+		case errors.Is(err, store.ErrNotProposed):
+			return failErr("not_proposed", "instruction %q is not waiting for approval", key)
 		}
 		return err
 	}
 	switch sub {
+	case "approve", "reject":
+		if err := inv.only("reason", "yes"); err != nil {
+			return err
+		}
+		if len(args) != 1 {
+			return usageErr("usage: sessionkeep instruction approve ID [--yes], or sessionkeep instruction reject ID [--reason R] [--yes]")
+		}
+		var ins store.Instruction
+		if err := withStore(st, func(ctx context.Context, s *store.Store) (err error) {
+			if ins, err = s.GetInstruction(ctx, args[0]); err != nil {
+				return err
+			}
+			if ins.State != "draft" {
+				return store.ErrNotProposed
+			}
+			if inv.flags["yes"] == "" {
+				return nil
+			}
+			if sub == "reject" {
+				return s.RejectInstruction(ctx, ins.ID, inv.flags["reason"])
+			}
+			ins, err = s.ApproveInstruction(ctx, ins.ID)
+			return err
+		}); err != nil {
+			return notFound(err, args[0])
+		}
+		if inv.flags["yes"] == "" {
+			effect := "It would be given, word for word, to every new session where it applies."
+			if sub == "reject" {
+				effect = "It would be turned down: kept in the history, never given to sessions."
+			}
+			inv.emit(map[string]any{"changed": false, "instruction": ins}, fmt.Sprintf("NOT CHANGED YET. Instruction %.8s (%s, %s) waits for approval:\n----\n%s\n----\n%s\nRun the same command with --yes to do it.\n",
+				ins.ID, ins.Scope, authorWords(ins.Author), ins.Text, effect))
+			return &cmdError{ExitNeedsConsent, "confirmation_required", "nothing was changed; add --yes to confirm"}
+		}
+		if sub == "reject" {
+			return inv.emit(map[string]any{"rejected": true, "id": ins.ID}, fmt.Sprintf("turned down instruction %.8s; it is never given to sessions\n", ins.ID))
+		}
+		return inv.emit(ins, fmt.Sprintf("approved instruction %.8s; it is given to new sessions from now on\n", ins.ID))
+
 	case "list":
 		if err := inv.only("all"); err != nil {
 			return err
@@ -1529,7 +1617,11 @@ func instructionCmd(inv invocation, rest []string) error {
 			if more {
 				first += " ..."
 			}
-			fmt.Fprintf(&b, "%.8s  %-8s rev %d  %-16s %s\n", i.ID, i.State, i.Revision, scope, first)
+			state := i.State
+			if state == "draft" {
+				state = "waiting" // for the user's approval
+			}
+			fmt.Fprintf(&b, "%.8s  %-8s rev %d  %-16s %s\n", i.ID, state, i.Revision, scope, first)
 		}
 		if len(all) == 0 {
 			b.WriteString("no instructions recorded\n")
@@ -1555,7 +1647,7 @@ func instructionCmd(inv invocation, rest []string) error {
 			return notFound(err, args[0])
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "instruction %s\nscope: %s %s\nstate: %s\n", ins.ID, ins.Scope, ins.ProjectID, ins.State)
+		fmt.Fprintf(&b, "instruction %s\nscope: %s %s\nstate: %s\nwritten by: %s\n", ins.ID, ins.Scope, ins.ProjectID, ins.State, authorWords(ins.Author))
 		for _, v := range hist {
 			fmt.Fprintf(&b, "---- revision %d | %s | %s | sha256 %.12s", v.Revision, v.Status, v.CreatedAt, v.Digest)
 			if v.Reason != "" {

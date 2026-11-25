@@ -14,7 +14,7 @@ import (
 func runner(getenv func(string) string) web.Runner {
 	return func(args []string, stdin []byte) ([]byte, []byte, int) {
 		var out, errOut bytes.Buffer
-		code := Run(args, bytes.NewReader(stdin), &out, &errOut, getenv)
+		code := execute(args, bytes.NewReader(stdin), &out, &errOut, getenv, true)
 		return out.Bytes(), errOut.Bytes(), code
 	}
 }

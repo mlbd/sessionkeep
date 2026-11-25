@@ -69,7 +69,7 @@ func TestAProjectIsHandedToATeammate(t *testing.T) {
 		t.Fatal("a preview stored text")
 	}
 	out = b.ok("handoff", "receive", file, "--project", theirs, "--yes")
-	if !strings.Contains(out, "RECEIVED: 1 instruction(s) (0 already there), 1 checkpoint(s) (0 already there), 2 piece(s) of text (0 already there)") {
+	if !strings.Contains(out, "RECEIVED: 1 instruction(s) waiting for your approval on the dashboard (0 already there), 1 checkpoint(s) (0 already there), 2 piece(s) of text (0 already there)") {
 		t.Errorf("first receive: %s", out)
 	}
 	for _, word := range []string{"PROMPTMARK", "REPLYMARK"} {
@@ -80,11 +80,22 @@ func TestAProjectIsHandedToATeammate(t *testing.T) {
 	if list := b.sessions("--project", theirs); len(list) != 1 {
 		t.Errorf("the receiver lists %d sessions, want 1", len(list))
 	}
-	if got := b.inject("SessionStart", "new-1", theirs); !strings.Contains(got, "HANDRULE") || !strings.Contains(got, "CHECKMARK") || !strings.Contains(got, "handoff file of Sam") {
-		t.Errorf("a new session of the receiver is not given the instruction and the checkpoint:\n%s", got)
+	// Someone else's instruction waits for the receiver's approval; their checkpoint is shown as theirs.
+	got := b.inject("SessionStart", "new-1", theirs)
+	if strings.Contains(got, "HANDRULE") || !strings.Contains(got, "CHECKMARK") || !strings.Contains(got, "handoff file of Sam") ||
+		!strings.Contains(got, "written by a teammate and received through sharing") || strings.Contains(got, "checkpoint the user recorded") {
+		t.Errorf("before approval a new session must get the teammate's checkpoint, marked as theirs, and not their instruction:\n%s", got)
+	}
+	waiting := b.waiting()
+	if len(waiting) != 1 || waiting[0].Text != "Use tabs in this project HANDRULE." || waiting[0].Author != "received:Sam" {
+		t.Fatalf("the received instruction should wait for approval, marked as Sam's: %+v", waiting)
+	}
+	b.ok("instruction", "approve", waiting[0].ID, "--yes")
+	if got := b.inject("SessionStart", "new-2", theirs); !strings.Contains(got, "HANDRULE") || !strings.Contains(got, `written by a teammate ("Sam"), approved by the user`) {
+		t.Errorf("after approval a new session is not given the instruction, marked as Sam's:\n%s", got)
 	}
 	out = b.ok("handoff", "receive", file, "--project", theirs, "--yes")
-	if !strings.Contains(out, "RECEIVED: 0 instruction(s) (1 already there), 0 checkpoint(s) (1 already there), 0 piece(s) of text (2 already there)") {
+	if !strings.Contains(out, "RECEIVED: 0 instruction(s) waiting for your approval on the dashboard (1 already there), 0 checkpoint(s) (1 already there), 0 piece(s) of text (2 already there)") {
 		t.Errorf("receiving the same file again should add nothing: %s", out)
 	}
 

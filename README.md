@@ -76,7 +76,7 @@ flowchart LR
 | Feature | What it does | Why |
 |---|---|---|
 | **Capture levels** | `metadata` (no text), `conversation` (prompts, final replies, tool errors), `extended` (plus a short piece of tool output), or `off`, per project | You decide how much is kept, project by project |
-| **Standing instructions** | `remember "Use pnpm"` is sent to every session, word for word | Rules you give once should never be paraphrased or lost |
+| **Standing instructions** | `remember "Use pnpm"` is sent to every session, word for word. One Claude saves for you waits until you approve it on the dashboard | Rules you give once should never be paraphrased or lost, and nobody else's should slip in |
 | **Checkpoints and resume** | `checkpoint "auth done, tests next"` stores where work stands with the Git branch and commit. `resume` prints it, warns if the code moved since, and adds the recent exchanges | Starting tomorrow should take seconds |
 | **After a compaction** | The next session start carries the last exchanges word for word | A compaction summary loses detail; the original words don't |
 | **Search** | `memory search "rate limit"` across one project or all of them, with exact matching and date filters | Find what was said, not what someone remembers was said |
@@ -294,6 +294,9 @@ sessionkeep team list          # which storage each project uses
 
 - **What is sent:** the project's instructions, checkpoints and session text. **Code is never
   sent**; use Git for that. `team push --no-sessions` leaves sessions out.
+- **A teammate's instructions wait for you.** Instructions you receive are listed under
+  **Instructions > Waiting for you** and reach Claude only once you approve them. Claude is told
+  which checkpoints, sessions and instructions came from a teammate.
 - **One passphrase per project.** One project's passphrase cannot open another project's bundles,
   even in the same bucket.
 - **Keys stay on your computer** and are never shown again: protected for your user by Windows,
@@ -317,6 +320,10 @@ sessionkeep team list          # which storage each project uses
 - Optional features that use the network or your Claude plan (summaries, web research, cloud
   sharing) are **off until you turn them on**, and each says what it does before it starts.
 - Shared bundles are encrypted with [age](https://age-encryption.org) on your computer before upload.
+- Claude cannot approve lasting changes for you. An instruction it saves, or one a teammate sends,
+  waits for your approval on the dashboard, and commands that delete data, sync or turn features on
+  are refused when Claude runs them. This protects against text Claude reads (a web page, a README)
+  telling it to plant an instruction.
 
 Report a vulnerability: [SECURITY.md](SECURITY.md).
 

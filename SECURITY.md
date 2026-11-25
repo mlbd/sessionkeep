@@ -33,6 +33,14 @@ disclosed; credit is given unless you prefer otherwise.
   until the user turns them on.
 - Shared bundles are encrypted on the sending computer with the project's passphrase
   ([age](https://age-encryption.org)) before upload; storage keys are kept protected on the computer.
+- An AI agent cannot approve a lasting change for the user. An instruction Claude saves, or one
+  received from a teammate, is given to no session until the user approves it on the dashboard
+  or in their own terminal; changing or deleting instructions and data, syncing, and turning on
+  summaries, web fetching or automatic recall are refused when Claude runs the command. What
+  Claude is told says who wrote each instruction, and marks a teammate's text as theirs.
+
+The last point stops the commands an agent is commonly allowed to run. It is not a barrier
+against a program that already runs as the user, which can change anything the user can.
 
 A way around any of these is a vulnerability. The design and threat model are in
 [docs/07-SECURITY_PRIVACY.md](docs/07-SECURITY_PRIVACY.md).

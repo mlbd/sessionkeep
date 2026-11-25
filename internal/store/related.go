@@ -11,6 +11,7 @@ type Related struct {
 	Who        string
 	ObservedAt string
 	Snippet    string
+	Received   bool // from a teammate's handoff file or team bundle, not said on this computer
 }
 
 // Related returns the project's stored prompts and replies that best match any of terms, best
@@ -25,7 +26,7 @@ func (s *Store) Related(ctx context.Context, projectID string, terms []string, s
 		quoted[i] = `"` + strings.ReplaceAll(t, `"`, `""`) + `"`
 	}
 	skip := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(skipSession)
-	rows, err := s.db.QueryContext(ctx, `select e.id, e.trust_level, e.observed_at, snippet(evidence_fts, 0, '', '', ' ... ', 48)
+	rows, err := s.db.QueryContext(ctx, `select e.id, e.trust_level, e.observed_at, snippet(evidence_fts, 0, '', '', ' ... ', 48), e.origin = 'handoff'
 		from evidence_fts join evidence e on e.seq = evidence_fts.rowid
 		where evidence_fts match ? and e.project_id = ? and e.text is not null and e.trust_level in ('user','assistant')
 		and e.source_locator not like ? escape '!'
@@ -37,7 +38,7 @@ func (s *Store) Related(ctx context.Context, projectID string, terms []string, s
 	var out []Related
 	for rows.Next() {
 		var r Related
-		if err := rows.Scan(&r.ID, &r.Who, &r.ObservedAt, &r.Snippet); err != nil {
+		if err := rows.Scan(&r.ID, &r.Who, &r.ObservedAt, &r.Snippet, &r.Received); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -77,6 +77,9 @@ func WithHistory(c *Cache, session, envelope string) string {
 			continue
 		}
 		b := fmt.Sprintf("[%s · session %s] began with: %s\n", day(p.At), short(p.Session), p.First)
+		if strings.HasPrefix(p.External, store.ReceivedSessionPrefix) {
+			b = fmt.Sprintf("[%s · session %s · a teammate's session, received through sharing] began with: %s\n", day(p.At), short(p.Session), p.First)
+		}
 		if p.Summary != "" {
 			b += "    summary, written by a model: " + p.Summary + "\n"
 		}
@@ -180,7 +183,11 @@ func RelatedNote(p config.Paths, projectID, session, prompt string, room int) st
 		if shared < 2 {
 			continue
 		}
-		b := fmt.Sprintf("[%s · %s · id %s]\n%s\n", who[r.Who], day(r.ObservedAt), short(r.ID), cutUnits(strings.Join(strings.Fields(r.Snippet), " "), maxRelatedUnits))
+		said := who[r.Who]
+		if r.Received {
+			said = map[string]string{"user": "a teammate", "assistant": "Claude, in a teammate's session"}[r.Who]
+		}
+		b := fmt.Sprintf("[%s · %s · id %s]\n%s\n", said, day(r.ObservedAt), short(r.ID), cutUnits(strings.Join(strings.Fields(r.Snippet), " "), maxRelatedUnits))
 		if units(b) > room {
 			break
 		}

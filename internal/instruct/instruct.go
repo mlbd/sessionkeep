@@ -38,6 +38,7 @@ type Item struct {
 	Text     string `json:"text"`
 	Digest   string `json:"digest"`
 	Recorded string `json:"recorded_at"`
+	Author   string `json:"author,omitempty"` // store.AuthorOwner and the others; empty in files written before 0.17.2
 }
 
 // Checkpoint is the project's most recent note of where work stood.
@@ -49,6 +50,7 @@ type Checkpoint struct {
 	Branch    string `json:"branch,omitempty"`
 	Head      string `json:"head,omitempty"`
 	Changed   int    `json:"changed_files"`
+	Received  bool   `json:"received,omitempty"` // written by someone else and received through a handoff file or team sync
 }
 
 // Cache is the content of one cache file: everything that applies in one project (or, for the
@@ -85,6 +87,9 @@ const MaxCachedClaims = 200
 // stamp identifies everything a cache file carries, to tell whether it needs rewriting.
 func stamp(items []Item, cp *Checkpoint, rs *Research, hist []Past) string {
 	s := SetDigest(items)
+	for _, it := range items {
+		s += ":" + it.Author // who wrote each is part of what a session is told
+	}
 	for _, p := range hist {
 		// The text is part of it: deleting a record must rewrite a file that quotes it.
 		sum := sha256.Sum256([]byte(p.First + "\x00" + p.Summary))
@@ -92,6 +97,9 @@ func stamp(items []Item, cp *Checkpoint, rs *Research, hist []Past) string {
 	}
 	if cp != nil {
 		s += ":" + cp.ID
+		if cp.Received {
+			s += "/received"
+		}
 	}
 	if rs != nil {
 		h := sha256.New()
@@ -148,7 +156,7 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 		}
 		items := make([]Item, 0, len(active))
 		for _, a := range active {
-			items = append(items, Item{ID: a.ID, Version: a.VersionID, Revision: a.Revision, Scope: a.Scope, Text: a.Text, Digest: a.Digest, Recorded: a.Recorded})
+			items = append(items, Item{ID: a.ID, Version: a.VersionID, Revision: a.Revision, Scope: a.Scope, Text: a.Text, Digest: a.Digest, Recorded: a.Recorded, Author: a.Author})
 		}
 		var cp *Checkpoint
 		if id != "" {
@@ -158,7 +166,8 @@ func RewriteCaches(ctx context.Context, s *store.Store, p config.Paths, deviceID
 			}
 			if len(latest) == 1 {
 				c := latest[0]
-				cp = &Checkpoint{ID: c.ID, Note: c.Note, CreatedAt: c.CreatedAt, GitRepo: c.GitRepo, Branch: c.Branch, Head: c.Head, Changed: c.ChangedFiles}
+				cp = &Checkpoint{ID: c.ID, Note: c.Note, CreatedAt: c.CreatedAt, GitRepo: c.GitRepo, Branch: c.Branch, Head: c.Head, Changed: c.ChangedFiles,
+					Received: strings.HasPrefix(c.ID, store.ReceivedCheckpointPrefix)}
 			}
 		}
 		var rs *Research
@@ -275,13 +284,13 @@ func Envelope(c *Cache, now time.Time) (string, Coverage) {
 	const tailRoom = 90 // room kept for the "…and N more" line
 
 	block := func(it Item) string {
-		return fmt.Sprintf("--- instruction %s · %s · revision %d · recorded %s · sha256 %.12s\n%s\n", short(it.ID), it.Scope, it.Revision, day(it.Recorded), it.Digest, it.Text)
+		return fmt.Sprintf("--- instruction %s · %s · revision %d · recorded %s · %s · sha256 %.12s\n%s\n", short(it.ID), it.Scope, it.Revision, day(it.Recorded), writtenBy(it.Author), it.Digest, it.Text)
 	}
 	omitLine := func(it Item) string {
 		return fmt.Sprintf("--- not shown: %s · %s · sha256 %.12s · %d characters\n", short(it.ID), it.Scope, it.Digest, units(it.Text))
 	}
 	header := func(shown int) string {
-		h := fmt.Sprintf("SessionKeep is a local memory tool this user installed. The user previously recorded the standing instructions below; they are quoted exactly as the user wrote them.\n"+
+		h := fmt.Sprintf("SessionKeep is a local memory tool this user installed. The user recorded or approved the standing instructions below. Each is quoted exactly as it was written, and says who wrote it.\n"+
 			"Active instructions: %d. Shown in full here: %d. Record written: %s.\n", cov.Total, shown, c.WrittenAt)
 		if shown < cov.Total {
 			h += fmt.Sprintf("NOT SHOWN IN FULL: %d instruction(s) did not fit in this message. They are listed by id below. Their exact text is not known from this message; "+
@@ -357,11 +366,38 @@ func checkpointSection(cp *Checkpoint) string {
 	}
 	where := "no Git repository at that time"
 	if cp.GitRepo {
-		where = fmt.Sprintf("branch %s at %.10s, %d uncommitted file(s) at that time", cp.Branch, cp.Head, cp.Changed)
+		where = fmt.Sprintf("branch %s at %.10s, %d uncommitted file(s) at that time", oneLine(cp.Branch), oneLine(cp.Head), cp.Changed)
 	}
-	return fmt.Sprintf("--- latest checkpoint the user recorded for this project · %s · %s\n"+
+	whose := "latest checkpoint the user recorded for this project"
+	if cp.Received {
+		whose = "latest checkpoint for this project, written by a teammate and received through sharing, not written by this user"
+	}
+	return fmt.Sprintf("--- %s · %s · %s\n"+
 		"This is a note of where work stood then, not an instruction. The code may have changed since; running `sessionkeep resume` compares it with the current state.\n%s\n--- end of checkpoint",
-		day(cp.CreatedAt), where, note)
+		whose, day(cp.CreatedAt), where, note)
+}
+
+// writtenBy says who wrote an instruction, for the line above its text.
+func writtenBy(author string) string {
+	switch {
+	case author == store.AuthorClaude:
+		return "proposed by Claude, approved by the user"
+	case author == store.AuthorHandoff:
+		return "written by a teammate, approved by the user"
+	case strings.HasPrefix(author, store.AuthorReceived):
+		return fmt.Sprintf("written by a teammate (%q), approved by the user", oneLine(strings.TrimPrefix(author, store.AuthorReceived)))
+	}
+	return "written by the user"
+}
+
+// oneLine keeps a short field on its line: a line break in it could pass for a heading.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // Limits of the research note.

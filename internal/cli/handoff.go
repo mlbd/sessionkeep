@@ -212,9 +212,9 @@ func handoffMake(inv invocation, dst string) error {
 // What this computer received from others is marked by how its ids begin, so that it is not
 // sent on as if it were this computer's own.
 const (
-	receivedInstruction = "hi"
-	receivedCheckpoint  = "ho"
-	receivedSession     = "handoff-"
+	receivedInstruction = store.ReceivedInstructionPrefix
+	receivedCheckpoint  = store.ReceivedCheckpointPrefix
+	receivedSession     = store.ReceivedSessionPrefix
 )
 
 func handoffID(prefix string, parts ...string) string {
@@ -261,7 +261,7 @@ func applyHandoff(ctx context.Context, s *store.Store, st state, proj store.Proj
 	var res handoffResult
 	from := senderName(f)
 	for _, x := range f.Instructions {
-		text, n := redact.Text(x.Text)
+		text, n := redact.Text(handoff.Clean(x.Text))
 		res.Secrets += n
 		// The id says where it came from, so it is taken once: not again after the receiver
 		// changed or retired it, and not sent on as the receiver's own.
@@ -270,7 +270,9 @@ func applyHandoff(ctx context.Context, s *store.Store, st state, proj store.Proj
 			res.InstructionsAlready++
 			continue
 		}
-		_, err := s.AddInstruction(ctx, store.NewInstruction{ID: id, VersionID: config.NewID(), Scope: "project", ProjectID: proj.ID, Text: text, Author: "handoff", Now: time.Now()})
+		// Someone else's words never reach Claude unseen: each waits for the receiver's approval,
+		// marked with the name the sender gave.
+		_, err := s.ProposeInstruction(ctx, store.NewInstruction{ID: id, VersionID: config.NewID(), Scope: "project", ProjectID: proj.ID, Text: text, Author: store.AuthorReceived + from, Now: time.Now()})
 		switch {
 		case errors.Is(err, store.ErrDuplicateInstruction):
 			res.InstructionsAlready++
@@ -281,7 +283,7 @@ func applyHandoff(ctx context.Context, s *store.Store, st state, proj store.Proj
 		}
 	}
 	for _, x := range f.Checkpoints {
-		note, n := redact.Text(x.Note)
+		note, n := redact.Text(handoff.Clean(x.Note))
 		res.Secrets += n
 		at, _ := time.Parse(time.RFC3339Nano, x.CreatedAt)
 		added, err := s.ImportCheckpoint(ctx, store.Checkpoint{ID: handoffID(receivedCheckpoint, f.SourceDevice, x.ID), ProjectID: proj.ID,
@@ -305,7 +307,7 @@ func applyHandoff(ctx context.Context, s *store.Store, st state, proj store.Proj
 		external := handoffID(receivedSession, f.SourceDevice, hs.ID)
 		pending := make([]store.IngestInput, 0, len(hs.Turns))
 		for i, t := range hs.Turns {
-			text, n := redact.Text(t.Text)
+			text, n := redact.Text(handoff.Clean(t.Text))
 			res.Secrets += n
 			at, _ := time.Parse(time.RFC3339Nano, t.At)
 			kind, status := "user_prompt", "none"
@@ -384,8 +386,9 @@ func handoffReceive(inv invocation, src string) error {
 		b.WriteString("The sessions are left out: this project is paused or does not save conversation text. Change that with `sessionkeep project capture`, then run this again.\n")
 	}
 	b.WriteString(instructionsToRead(f.Instructions))
+	b.WriteString(checkpointsToRead(f.Checkpoints))
 	out := map[string]any{"received": apply, "file": src, "from": from, "made_at": f.CreatedAt, "source_project": f.Project, "project_id": proj.ID,
-		"counts": c, "sessions_taken": takesSessions(proj), "instructions": f.Instructions}
+		"counts": c, "sessions_taken": takesSessions(proj), "instructions": f.Instructions, "checkpoints": f.Checkpoints}
 	if !apply {
 		b.WriteString("NOTHING RECEIVED YET. Run the same command with --yes to take it in.\n")
 		inv.emit(out, b.String())
@@ -403,15 +406,30 @@ func instructionsToRead(list []handoff.Instruction) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("These instructions would be given to Claude in every session of this project, as if you had recorded them. Read them:\n")
+	b.WriteString("These instructions would wait for your approval on the dashboard (Instructions). None is given to Claude until you approve it. Read them:\n")
 	for _, x := range list {
-		fmt.Fprintf(&b, "----\n%s\n", x.Text)
+		fmt.Fprintf(&b, "----\n%s\n", handoff.Clean(x.Text))
+	}
+	b.WriteString("----\n")
+	return b.String()
+}
+
+// checkpointsToRead prints checkpoint notes someone else wrote before they are taken in: the
+// newest one is shown to Claude at the start of sessions, as a note of where work stood.
+func checkpointsToRead(list []handoff.Checkpoint) string {
+	if len(list) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Checkpoint notes (the newest is shown to Claude at the start of sessions, marked as written by its sender):\n")
+	for _, x := range list {
+		fmt.Fprintf(&b, "---- %.16s\n%s\n", x.CreatedAt, handoff.Clean(x.Note))
 	}
 	b.WriteString("----\n")
 	return b.String()
 }
 
 func receivedLine(res handoffResult) string {
-	return fmt.Sprintf("RECEIVED: %d instruction(s) (%d already there), %d checkpoint(s) (%d already there), %d piece(s) of text (%d already there). Secrets removed on the way in: %d.\n",
+	return fmt.Sprintf("RECEIVED: %d instruction(s) waiting for your approval on the dashboard (%d already there), %d checkpoint(s) (%d already there), %d piece(s) of text (%d already there). Secrets removed on the way in: %d.\n",
 		res.Instructions, res.InstructionsAlready, res.Checkpoints, res.CheckpointsAlready, res.Turns, res.TurnsAlready, res.Secrets)
 }

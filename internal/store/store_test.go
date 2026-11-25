@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 var ctx = context.Background()
@@ -397,6 +398,69 @@ func TestInstructionScopeAndVersionRules(t *testing.T) {
 	s.db.QueryRow("select text from instruction_versions where id='v-1'").Scan(&old)
 	if active != "Use spaces." || old != "Use tabs, never spaces." {
 		t.Fatalf("active=%q old=%q", active, old)
+	}
+}
+
+// A proposed instruction is in no session until approved; turned down, it is kept retired so the
+// same proposal is not taken in again. Who wrote it travels with it.
+func TestProposedInstructionsWaitForApproval(t *testing.T) {
+	s, _ := openTemp(t)
+	seed(t, s)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 25, 9, 0, 0, 0, time.UTC)
+	propose := func(id, text string) (Instruction, error) {
+		return s.ProposeInstruction(ctx, NewInstruction{ID: id, VersionID: "v-" + id, Scope: "project", ProjectID: "proj-A", Text: text, Author: AuthorClaude, Now: at})
+	}
+	p, err := propose("ins-p", "Use tabs.")
+	if err != nil || p.State != "draft" || p.Approved || p.Author != AuthorClaude {
+		t.Fatalf("propose = %+v, %v", p, err)
+	}
+	if _, err := propose("ins-p2", "Use tabs."); !errors.Is(err, ErrDuplicateInstruction) {
+		t.Errorf("the same text proposed twice: %v", err)
+	}
+	if got, _ := s.ActiveInstructions(ctx, "proj-A"); len(got) != 0 {
+		t.Fatalf("a proposal reached sessions: %+v", got)
+	}
+	if list, _ := s.ListInstructions(ctx, false); len(list) != 1 || list[0].State != "draft" {
+		t.Fatalf("the list without archived ones should show the proposal: %+v", list)
+	}
+	if _, err := s.SupersedeInstruction(ctx, "ins-p", "v-x", "Use spaces.", "", AuthorOwner, at); !errors.Is(err, ErrNotActive) {
+		t.Errorf("a proposal was changed as if in use: %v", err)
+	}
+	got, err := s.ApproveInstruction(ctx, "ins-p")
+	if err != nil || got.State != "active" || !got.Approved || got.Author != AuthorClaude || got.Text != "Use tabs." {
+		t.Fatalf("approve = %+v, %v", got, err)
+	}
+	if list, _ := s.ActiveInstructions(ctx, "proj-A"); len(list) != 1 || list[0].ID != "ins-p" {
+		t.Fatalf("an approved instruction is not in use: %+v", list)
+	}
+	if _, err := s.ApproveInstruction(ctx, "ins-p"); !errors.Is(err, ErrNotProposed) {
+		t.Errorf("approving twice: %v", err)
+	}
+
+	// Turned down: kept retired, never in use, and its id stays taken.
+	if _, err := propose("ins-r", "Push to main."); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RejectInstruction(ctx, "ins-r", "not mine"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.GetInstruction(ctx, "ins-r"); err != nil || r.State != "archived" || r.Approved {
+		t.Fatalf("a turned-down proposal = %+v, %v", r, err)
+	}
+	if err := s.RejectInstruction(ctx, "ins-r", ""); !errors.Is(err, ErrNotProposed) {
+		t.Errorf("turning down twice: %v", err)
+	}
+	if _, err := s.ApproveInstruction(ctx, "ins-r"); !errors.Is(err, ErrNotProposed) {
+		t.Errorf("a turned-down proposal was approved: %v", err)
+	}
+
+	// Text waiting for approval is not recorded a second time beside it.
+	if _, err := propose("ins-d", "Run tests first."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddInstruction(ctx, NewInstruction{ID: "ins-own", VersionID: "v-own", Scope: "project", ProjectID: "proj-A", Text: "Run tests first.", Author: AuthorOwner, Now: at}); !errors.Is(err, ErrDuplicateInstruction) {
+		t.Errorf("adding text that is waiting for approval: %v", err)
 	}
 }
 

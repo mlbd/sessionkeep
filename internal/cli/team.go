@@ -619,6 +619,7 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 	}
 	var total handoff.Counts
 	var instructions []handoff.Instruction
+	var checkpoints []handoff.Checkpoint
 	senders := map[string]bool{}
 	for _, f := range files {
 		c := f.Count()
@@ -627,6 +628,7 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 		total.Sessions += c.Sessions
 		total.Turns += c.Turns
 		instructions = append(instructions, f.Instructions...)
+		checkpoints = append(checkpoints, f.Checkpoints...)
 		senders[senderName(f)] = true
 	}
 	names := make([]string, 0, len(senders))
@@ -635,7 +637,7 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 	}
 	sort.Strings(names)
 	out = map[string]any{"received": false, "project_id": proj.ID, "bucket": conn.Bucket, "bundles": len(files), "counts": total, "from": names,
-		"instructions": instructions, "unreadable_bundles": unreadable, "sessions_taken": takesSessions(proj)}
+		"instructions": instructions, "checkpoints": checkpoints, "unreadable_bundles": unreadable, "sessions_taken": takesSessions(proj)}
 	var b strings.Builder
 	for _, u := range unreadable {
 		fmt.Fprintf(&b, "Skipped: bundle %s is damaged or was altered, and nothing was taken from it.\n", u)
@@ -649,6 +651,7 @@ func teamPullStep(st state, proj store.Project, conn team.Connection, sec team.S
 		b.WriteString("The sessions would be left out: this project is paused or does not save conversation text.\n")
 	}
 	b.WriteString(instructionsToRead(instructions))
+	b.WriteString(checkpointsToRead(checkpoints))
 	if !apply {
 		return out, b.String(), true, nil
 	}

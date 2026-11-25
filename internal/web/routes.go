@@ -226,7 +226,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 			return
 		}
 		action := r.PathValue("action")
-		if action != "supersede" && action != "archive" {
+		if action != "supersede" && action != "archive" && action != "approve" && action != "reject" {
 			fail(w, http.StatusNotFound, "not_found", "no such action")
 			return
 		}

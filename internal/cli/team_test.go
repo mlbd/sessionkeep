@@ -84,7 +84,7 @@ func TestTwoColleaguesExchangeAProjectThroughABucket(t *testing.T) {
 	if hits := b.search("AMARK", "--project", theirs).Data.Hits; len(hits) != 0 {
 		t.Fatal("a preview stored text")
 	}
-	if out := b.ok("team", "pull", "--project", theirs, "--yes"); !strings.Contains(out, "RECEIVED: 1 instruction(s) (0 already there), 1 checkpoint(s) (0 already there), 2 piece(s) of text (0 already there)") {
+	if out := b.ok("team", "pull", "--project", theirs, "--yes"); !strings.Contains(out, "RECEIVED: 1 instruction(s) waiting for your approval on the dashboard (0 already there), 1 checkpoint(s) (0 already there), 2 piece(s) of text (0 already there)") {
 		t.Errorf("pull: %s", out)
 	}
 	for _, word := range []string{"AMARK", "AREPLY"} {
@@ -92,8 +92,16 @@ func TestTwoColleaguesExchangeAProjectThroughABucket(t *testing.T) {
 			t.Errorf("%s is found %d times by the receiver, want once", word, len(hits))
 		}
 	}
-	if got := b.inject("SessionStart", "n-1", theirs); !strings.Contains(got, "TEAMRULE") || !strings.Contains(got, "ACHECK") {
-		t.Errorf("a new session of the receiver lacks the instruction or the checkpoint:\n%s", got)
+	if got := b.inject("SessionStart", "n-1", theirs); strings.Contains(got, "TEAMRULE") || !strings.Contains(got, "ACHECK") || !strings.Contains(got, "written by a teammate") {
+		t.Errorf("before approval a new session must get the teammate's checkpoint, marked as theirs, and not their instruction:\n%s", got)
+	}
+	if w := b.waiting(); len(w) != 1 || w[0].Author != "received:Sam" {
+		t.Fatalf("the received instruction should wait for approval, marked as Sam's: %+v", w)
+	} else {
+		b.ok("instruction", "approve", w[0].ID, "--yes")
+	}
+	if got := b.inject("SessionStart", "n-2", theirs); !strings.Contains(got, "TEAMRULE") || !strings.Contains(got, "ACHECK") {
+		t.Errorf("after approval a new session of the receiver lacks the instruction or the checkpoint:\n%s", got)
 	}
 	if out := b.ok("team", "pull", "--project", theirs, "--yes"); !strings.Contains(out, "Nothing new from the team") {
 		t.Errorf("a second pull: %s", out)
@@ -123,8 +131,8 @@ func TestTwoColleaguesExchangeAProjectThroughABucket(t *testing.T) {
 	if out := b.ok("team", "pull", "--project", theirs, "--yes"); !strings.Contains(out, "1 piece(s) of text (0 already there)") {
 		t.Errorf("the new part: %s", out)
 	}
-	if list := b.sessions("--project", theirs); len(list) != 3 {
-		t.Errorf("the receiver lists %d sessions, want 3 (the sender's one, grown, and their own two)", len(list))
+	if list := b.sessions("--project", theirs); len(list) != 4 {
+		t.Errorf("the receiver lists %d sessions, want 4 (the sender's one, grown, and their own three)", len(list))
 	}
 
 	// Another passphrase opens nothing and cannot even connect to this shared name.

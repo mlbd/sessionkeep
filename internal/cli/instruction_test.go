@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/store"
 )
 
 // sessionStart runs the SessionStart hook for cwd and returns the context Claude would receive.
@@ -47,6 +48,22 @@ func (sb *sandbox) remember(scope, text string, extra ...string) string {
 		sb.t.Fatalf("remember: %v", err)
 	}
 	return got.Data.ID
+}
+
+// waiting returns the instructions that wait for the user's approval.
+func (sb *sandbox) waiting() []store.Instruction {
+	sb.t.Helper()
+	var got struct{ Data []store.Instruction }
+	if err := json.Unmarshal([]byte(sb.ok("instruction", "list", "--json")), &got); err != nil {
+		sb.t.Fatalf("instruction list: %v", err)
+	}
+	var out []store.Instruction
+	for _, i := range got.Data {
+		if i.State == "draft" {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 func TestRememberNeedsScopeAndConfirmation(t *testing.T) {

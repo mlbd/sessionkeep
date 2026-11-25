@@ -106,13 +106,69 @@ func (f File) Count() Counts {
 // ErrInvalid means the file is not a usable handoff file.
 var ErrInvalid = errors.New("not a valid SessionKeep handoff file")
 
-var idForm = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+var (
+	idForm   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+	headForm = regexp.MustCompile(`^[0-9a-f]{0,64}$`) // a full commit id, or empty before the first commit
+)
+
+// branchOK checks a branch name: Git allows no spaces or control characters in one, and it is
+// shown inside a line, so a line break in it could pass for a heading of its own.
+func branchOK(v string) bool {
+	return len(v) <= 250 && plainLine(v) && !strings.ContainsAny(v, "  ")
+}
+
+// FutureMargin is how far ahead of this computer's clock a received time may be, for clocks that
+// are a little off. A time further ahead is refused: a checkpoint dated years ahead would
+// otherwise stay "the latest" for ever.
+const FutureMargin = time.Hour
+
+// now is the clock Validate compares received times with.
+var now = time.Now
 
 func checkTime(what, v string) error {
-	if _, err := time.Parse(time.RFC3339Nano, v); err != nil {
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
 		return fmt.Errorf("%w: %s has a time that cannot be read", ErrInvalid, what)
 	}
+	if t.After(now().Add(FutureMargin)) {
+		return fmt.Errorf("%w: %s is dated in the future (%s)", ErrInvalid, what, t.UTC().Format("2006-01-02 15:04"))
+	}
 	return nil
+}
+
+// hidden reports characters that change how text looks without being seen: control characters
+// (terminal escape codes among them) other than tab and line breaks, and the Unicode marks that
+// reorder text or separate lines. Joiners used inside emoji and some scripts are allowed.
+func hidden(r rune) bool {
+	switch {
+	case r == '\t' || r == '\n' || r == '\r':
+		return false
+	case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+		return true
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0x2028 || r == 0x2029, r == 0x200b, r == 0x2060, r == 0xfeff:
+		return true
+	}
+	return false
+}
+
+// Clean returns text someone else wrote with every hidden character replaced by a visible
+// U+FFFD, so that what is shown and stored is what it looks like.
+func Clean(s string) string {
+	if strings.IndexFunc(s, hidden) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if hidden(r) {
+			return '�'
+		}
+		return r
+	}, s)
+}
+
+// plainLine checks a short field shown inside a line, such as a name: no line breaks and no
+// hidden characters.
+func plainLine(v string) bool {
+	return strings.IndexFunc(v, func(r rune) bool { return r == '\n' || r == '\r' || r == '\t' || hidden(r) }) < 0
 }
 
 func checkText(what, v string) error {
@@ -130,7 +186,8 @@ func (f File) Validate() error {
 	if f.Format != Format {
 		return fmt.Errorf("%w: format %d is not supported by this version (expects %d)", ErrInvalid, f.Format, Format)
 	}
-	if !idForm.MatchString(f.Project.ID) || strings.TrimSpace(f.Project.Name) == "" || len(f.Project.Name) > 200 || !idForm.MatchString(f.SourceDevice) || len(f.From) > 100 {
+	if !idForm.MatchString(f.Project.ID) || strings.TrimSpace(f.Project.Name) == "" || len(f.Project.Name) > 200 || !plainLine(f.Project.Name) ||
+		!idForm.MatchString(f.SourceDevice) || len(f.From) > 100 || !plainLine(f.From) || !plainLine(f.MadeBy) || len(f.MadeBy) > 100 {
 		return fmt.Errorf("%w: the project or sender fields are missing or malformed", ErrInvalid)
 	}
 	if err := checkTime("the file", f.CreatedAt); err != nil {
@@ -157,7 +214,7 @@ func (f File) Validate() error {
 		if err := errors.Join(id("a checkpoint", x.ID), checkText("a checkpoint", x.Note), checkTime("a checkpoint", x.CreatedAt)); err != nil {
 			return err
 		}
-		if len(x.Branch) > 300 || len(x.Head) > 80 {
+		if !branchOK(x.Branch) || !headForm.MatchString(x.Head) {
 			return fmt.Errorf("%w: a checkpoint has malformed Git fields", ErrInvalid)
 		}
 	}
