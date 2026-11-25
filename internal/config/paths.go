@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -101,13 +102,19 @@ func isAbs(goos, p string) bool {
 // Ensure creates the data, spool and cache directories for the current user and proves the data
 // directory is writable. It is for setup and the lease holder, never for hooks.
 //
-// The 0700 mode restricts access on Unix. On Windows, Go does not translate it into an ACL; the
-// default location inherits the per-user ACL of the profile, and a custom location keeps whatever
-// ACL its parent has.
+// The 0700 mode restricts access on Unix. MkdirAll leaves a folder that already exists as it is
+// (on macOS the installer may create the data folder first, with the usual 0755), so on Unix the
+// mode is set as well (L4). On Windows, Go does not translate it into an ACL; the default location
+// inherits the per-user ACL of the profile, and a custom location keeps whatever ACL its parent has.
 func Ensure(p Paths) error {
 	for _, d := range []string{p.DataDir, p.SpoolDir, p.CacheDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("create %s: %w", d, err)
+		}
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(d, 0o700); err != nil {
+				return fmt.Errorf("make %s private: %w", d, err)
+			}
 		}
 	}
 	f, err := os.CreateTemp(p.DataDir, ".write-check-*")

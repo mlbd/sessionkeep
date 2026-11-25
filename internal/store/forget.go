@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -67,6 +68,9 @@ func VerifyFile(ctx context.Context, path string) (schema int, t Totals, err err
 	if err := db.QueryRowContext(ctx, "select coalesce(max(version),0) from schema_migrations").Scan(&schema); err != nil {
 		return 0, t, fmt.Errorf("not a SessionKeep database: %w", err)
 	}
+	if err := sameSchema(ctx, db, schema); err != nil {
+		return 0, t, err
+	}
 	// Older schemas lack some tables; count what exists.
 	has := func(table string) bool {
 		var n int
@@ -83,6 +87,129 @@ func VerifyFile(ctx context.Context, path string) (schema int, t Totals, err err
 	t = Totals{Projects: count("projects"), Sessions: count("sessions"), Events: count("events"), Evidence: count("evidence"),
 		Instructions: count("instructions"), Versions: count("instruction_versions"), Checkpoints: count("checkpoints"), Gaps: count("capture_gaps")}
 	return schema, t, nil
+}
+
+// FilePreview is what an export would bring in that changes what SessionKeep does: the folders it
+// captures and the instructions every new session is given as the user's.
+type FilePreview struct {
+	Folders      []PreviewFolder      `json:"folders"`
+	Instructions []PreviewInstruction `json:"instructions"`
+}
+
+type PreviewFolder struct {
+	Project string `json:"project"`
+	Path    string `json:"path"`
+}
+
+type PreviewInstruction struct {
+	Scope   string `json:"scope"`
+	Project string `json:"project,omitempty"`
+	Text    string `json:"text"`
+}
+
+// Preview reads, without changing it, the registered folders and active instructions of a
+// database copy that VerifyFile accepted (L3).
+func Preview(ctx context.Context, path string) (FilePreview, error) {
+	var out FilePreview
+	p := strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(path))
+	db, err := sql.Open("sqlite", "file:"+p+"?mode=ro&immutable=1")
+	if err != nil {
+		return out, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `select p.name, r.normalized_path from project_roots r join projects p on p.id = r.project_id order by p.name, r.normalized_path`)
+	if err != nil {
+		return out, err
+	}
+	for rows.Next() {
+		var f PreviewFolder
+		if err := rows.Scan(&f.Project, &f.Path); err != nil {
+			rows.Close()
+			return out, err
+		}
+		out.Folders = append(out.Folders, f)
+	}
+	rows.Close()
+	rows, err = db.QueryContext(ctx, `select i.scope_kind, coalesce(p.name, ''), v.text from instructions i
+  join instruction_versions v on v.instruction_id = i.id and v.status = 'active'
+  left join projects p on p.id = i.project_id
+  where i.state = 'active' order by i.scope_kind, p.name, i.created_at`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var in PreviewInstruction
+		if err := rows.Scan(&in.Scope, &in.Project, &in.Text); err != nil {
+			return out, err
+		}
+		out.Instructions = append(out.Instructions, in)
+	}
+	return out, rows.Err()
+}
+
+// sameSchema checks that a database holds exactly the tables, indexes, triggers and views that
+// SessionKeep's own migrations create at its version (L3). An export from someone else could carry
+// a trigger that runs on every insert after it is restored, or a changed table; such a file is
+// refused. Whitespace differences in the stored SQL are ignored.
+func sameSchema(ctx context.Context, db *sql.DB, version int) error {
+	if version > SchemaVersion() {
+		return nil // too new to compare; the import refuses it for that reason
+	}
+	ref, err := sql.Open("sqlite", "file::memory:")
+	if err != nil {
+		return err
+	}
+	defer ref.Close()
+	ref.SetMaxOpenConns(1) // one connection, so every statement sees the same in-memory database
+	if _, err := migrateUpTo(ctx, ref, embedded, "migrations", version); err != nil {
+		return fmt.Errorf("build the reference schema: %w", err)
+	}
+	want, err := schemaObjects(ctx, ref)
+	if err != nil {
+		return err
+	}
+	got, err := schemaObjects(ctx, db)
+	if err != nil {
+		return err
+	}
+	var diff []string
+	for k, s := range got {
+		if w, ok := want[k]; !ok {
+			diff = append(diff, "an extra "+k)
+		} else if w != s {
+			diff = append(diff, "a changed "+k)
+		}
+	}
+	for k := range want {
+		if _, ok := got[k]; !ok {
+			diff = append(diff, "a missing "+k)
+		}
+	}
+	if len(diff) > 0 {
+		sort.Strings(diff)
+		return fmt.Errorf("the database copy is not laid out as SessionKeep makes it (data version %d): it has %s", version, strings.Join(diff, ", "))
+	}
+	return nil
+}
+
+// schemaObjects maps "type name" to the object's SQL with runs of whitespace made one space.
+// SQLite's own objects (sqlite_*) are left out.
+func schemaObjects(ctx context.Context, db *sql.DB) (map[string]string, error) {
+	rows, err := db.QueryContext(ctx, `select type, name, coalesce(sql, '') from sqlite_master where name not like 'sqlite\_%' escape '\'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var typ, name, text string
+		if err := rows.Scan(&typ, &name, &text); err != nil {
+			return nil, err
+		}
+		out[typ+" "+name] = strings.Join(strings.Fields(text), " ")
+	}
+	return out, rows.Err()
 }
 
 // SchemaVersion is the number of migrations this binary knows.

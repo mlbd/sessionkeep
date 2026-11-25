@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,6 +147,13 @@ func importCmd(inv invocation, rest []string) error {
 		"target": p.DataDir, "problems": problems, "would_restore": len(problems) == 0, "restored": false, "settings": settingsNote}
 	text := fmt.Sprintf("export made %s by sessionkeep %s, data version %d\ncontains: %d project(s), %d session(s), %d event(s), %d text record(s), %d instruction(s), %d checkpoint(s)\nfile integrity: every entry matches its recorded digest; database integrity check passed\ntarget: %s\n%s\n",
 		man.CreatedAt, man.Version, schema, totals.Projects, totals.Sessions, totals.Events, totals.Evidence, totals.Instructions, totals.Checkpoints, p.DataDir, settingsNote)
+	if len(problems) == 0 {
+		more, err := importPreview(ctx, work, report, hasSettings != nil)
+		if err != nil {
+			return failErr("invalid_export", "the export could not be read: %v", err)
+		}
+		text += more
+	}
 	for _, pr := range problems {
 		text += "PROBLEM: " + pr + "\n"
 	}
@@ -336,6 +344,55 @@ func forgetCmd(inv invocation, rest []string) error {
 		fmt.Sprintf("deleted: %s.\nThe search index no longer contains it and the database file was rewritten without it.\n%s", counts, forgetLimits))
 }
 
+// importPreview says what an export changes about what SessionKeep does once restored: the folders
+// it captures, the instructions every new session is given as the user's, and, when its settings
+// are restored, the ones that open the network or another account (L3). It adds the same to
+// report.
+func importPreview(ctx context.Context, work string, report map[string]any, settingsRestored bool) (string, error) {
+	pv, err := store.Preview(ctx, filepath.Join(work, archive.DBName))
+	if err != nil {
+		return "", err
+	}
+	report["folders"], report["instructions"] = pv.Folders, pv.Instructions
+	var b strings.Builder
+	fmt.Fprintf(&b, "folders that would be captured (%d):\n", len(pv.Folders))
+	for _, f := range pv.Folders {
+		fmt.Fprintf(&b, "  %s  (project %q)\n", f.Path, f.Project)
+	}
+	fmt.Fprintf(&b, "instructions every new session would be given as yours (%d):\n", len(pv.Instructions))
+	for _, in := range pv.Instructions {
+		where := in.Scope
+		if in.Project != "" {
+			where += " " + strconv.Quote(in.Project)
+		}
+		fmt.Fprintf(&b, "  [%s] %s\n", where, strings.Join(strings.Fields(firstRunes(in.Text, 200)), " "))
+	}
+	if settingsRestored {
+		s, err := config.LoadSettings(config.Paths{DataDir: work})
+		if err != nil {
+			return "", fmt.Errorf("its settings: %w", err)
+		}
+		account := "whichever account a session runs with"
+		if s.ClaudeAccount.Chosen {
+			account = "the default account"
+			if s.ClaudeAccount.ConfigDir != "" {
+				account = s.ClaudeAccount.ConfigDir
+			}
+		}
+		onOff := map[bool]string{true: "on", false: "off"}
+		settings := map[string]any{"unregistered_folders": describeMode(s.AutoAdd), "summaries": s.Summaries.Enabled, "web_research": s.Research.Enabled,
+			"research_allow_local": s.Research.AllowLocal, "claude_account": account, "exclusions": len(s.Exclusions)}
+		report["export_settings"] = settings
+		fmt.Fprintf(&b, "settings that would be restored: unregistered folders: %s; automatic summaries %s; web research %s; Claude Code account: %s; %d exclusion(s)\n",
+			describeMode(s.AutoAdd), onOff[s.Summaries.Enabled], onOff[s.Research.Enabled], account, len(s.Exclusions))
+		if len(s.Research.AllowLocal) > 0 {
+			fmt.Fprintf(&b, "  web research may fetch these addresses on this computer or network: %s\n", strings.Join(s.Research.AllowLocal, ", "))
+		}
+	}
+	b.WriteString("Import only an export you made yourself: the instructions above would be given to Claude as yours, and the folders above would be captured.\n")
+	return b.String(), nil
+}
+
 func firstRunes(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n]) + " ..."
@@ -345,20 +402,25 @@ func firstRunes(s string, n int) string {
 
 // dropSpooled removes events of a project that are still waiting in the spool, so deleted data
 // is not stored again by the next drain.
+//
+// Quarantined files of the project go too (L5): they hold captured text like any event, and the
+// events of a deleted project that arrive later are quarantined as belonging to no project.
 func dropSpooled(p config.Paths, projectID string) {
-	entries, err := os.ReadDir(p.SpoolDir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".evt") {
+	for _, dir := range []string{p.SpoolDir, filepath.Join(p.DataDir, ingest.QuarantineDir)} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
 			continue
 		}
-		path := filepath.Join(p.SpoolDir, e.Name())
-		raw, err := os.ReadFile(path)
-		var ev capture.Event
-		if err == nil && json.Unmarshal(raw, &ev) == nil && ev.ProjectID == projectID {
-			os.Remove(path)
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".evt") {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			raw, err := os.ReadFile(path)
+			var ev capture.Event
+			if err == nil && json.Unmarshal(raw, &ev) == nil && ev.ProjectID == projectID {
+				os.Remove(path)
+			}
 		}
 	}
 }

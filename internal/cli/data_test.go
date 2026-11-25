@@ -3,6 +3,7 @@ package cli
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,9 @@ import (
 	"sync"
 	"testing"
 
+	"sessionkeep/internal/archive"
 	"sessionkeep/internal/config"
+	"sessionkeep/internal/ingest"
 )
 
 // onDisk reports whether token appears, in any letter case, in any file under dir.
@@ -74,6 +77,12 @@ func TestExportThenImportIntoAFreshProfile(t *testing.T) {
 	// Dry run against a brand-new, non-existent data directory: verifies and changes nothing.
 	fresh := &sandbox{t: t, work: sb.work, env: map[string]string{config.EnvDataDir: filepath.Join(t.TempDir(), "restored profile"), "HOME": sb.env["HOME"], "USERPROFILE": sb.env["USERPROFILE"]}}
 	dry := fresh.ok("import", file, "--dry-run")
+	// The preview names what the export changes once restored (L3).
+	for _, want := range []string{"folders that would be captured (2)", "Alpha rule: ISO dates only.", "settings that would be restored: unregistered folders:", "automatic summaries off", "Import only an export you made yourself"} {
+		if !strings.Contains(dry, want) {
+			t.Errorf("the import preview lacks %q:\n%s", want, dry)
+		}
+	}
 	if !strings.Contains(dry, "DRY RUN: this import would succeed") || !strings.Contains(dry, "integrity check passed") {
 		t.Fatalf("dry run: %q", dry)
 	}
@@ -168,9 +177,35 @@ func TestImportRejectsDamagedAndHostileFiles(t *testing.T) {
 		return p
 	}
 	same := func(n string, b []byte) (string, []byte, bool) { return n, b, true }
+	// An export someone made by hand: correct digests and counts, but its database carries a
+	// trigger that would run on every stored event after the restore (L3).
+	planted := func() string {
+		dir := t.TempDir()
+		man, err := archive.Extract(good, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db, err := sql.Open("sqlite", filepath.Join(dir, archive.DBName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`create trigger planted after insert on events begin update events set payload = payload; end`); err != nil {
+			t.Fatal(err)
+		}
+		db.Close()
+		p := filepath.Join(t.TempDir(), "planted.sessionkeep")
+		if _, err := archive.Write(p, filepath.Join(dir, archive.DBName), filepath.Join(dir, archive.SettingsName), man); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}()
+	if code, out, errOut := target().run("import", planted, "--dry-run"); code == ExitOK || !strings.Contains(out+errOut, "an extra trigger planted") {
+		t.Errorf("an export with a planted trigger: exit %d %q", code, out+errOut)
+	}
 	cases := map[string]string{
-		"not a zip":    func() string { p := filepath.Join(t.TempDir(), "x"); os.WriteFile(p, []byte("hello"), 0o600); return p }(),
-		"missing file": filepath.Join(t.TempDir(), "nope.sessionkeep"),
+		"planted trigger": planted,
+		"not a zip":       func() string { p := filepath.Join(t.TempDir(), "x"); os.WriteFile(p, []byte("hello"), 0o600); return p }(),
+		"missing file":    filepath.Join(t.TempDir(), "nope.sessionkeep"),
 		"database altered": rezip(func(n string, b []byte) (string, []byte, bool) {
 			if n == "sessionkeep.db" {
 				b = append([]byte(nil), b...)
@@ -281,6 +316,19 @@ func TestForgetCapturedKeepsInstructionsAndCheckpoints(t *testing.T) {
 	sb, a, b := populated(t)
 	sb.say("UserPromptSubmit", "s-a", a, "still waiting in the spool QUEUEDMARKER55")
 	sb.say("UserPromptSubmit", "s-b", b, "beta waiting in the spool")
+	// A quarantined copy of each project's waiting event, as ingest leaves one it cannot store (L5).
+	data := sb.env[config.EnvDataDir]
+	spool, _ := os.ReadDir(filepath.Join(data, "spool"))
+	os.MkdirAll(filepath.Join(data, ingest.QuarantineDir), 0o700)
+	for _, e := range spool {
+		raw, _ := os.ReadFile(filepath.Join(data, "spool", e.Name()))
+		raw = bytes.ReplaceAll(raw, []byte("QUEUEDMARKER55"), []byte("QUARMARKER66"))
+		raw = bytes.ReplaceAll(raw, []byte("beta waiting"), []byte("QUARBETA77"))
+		os.WriteFile(filepath.Join(data, ingest.QuarantineDir, "q-"+e.Name()), raw, 0o600)
+	}
+	if len(onDisk(t, data, "QUARMARKER66")) == 0 || len(onDisk(t, data, "QUARBETA77")) == 0 {
+		t.Fatal("the test did not put both quarantined files in place")
+	}
 	if code, out, _ := sb.run("forget", "captured", "--project", a); code != ExitNeedsConsent || !strings.Contains(out, "3 event(s), 3 text record(s), 1 session(s)") {
 		t.Fatalf("preview: exit=%d %q", code, out)
 	}
@@ -291,6 +339,12 @@ func TestForgetCapturedKeepsInstructionsAndCheckpoints(t *testing.T) {
 	}
 	if where := onDisk(t, sb.env[config.EnvDataDir], "QUEUEDMARKER55"); len(where) != 0 {
 		t.Fatalf("an event of the project that was waiting in the spool survived: %v", where)
+	}
+	if where := onDisk(t, data, "QUARMARKER66"); len(where) != 0 {
+		t.Fatalf("a quarantined event of the project survived: %v", where)
+	}
+	if len(onDisk(t, data, "QUARBETA77")) == 0 {
+		t.Fatal("the other project's quarantined event was deleted")
 	}
 	if ctx := sb.inject("SessionStart", "s-x", a); !strings.Contains(ctx, "Alpha rule: ISO dates only.") {
 		t.Fatal("instructions must survive forgetting captured text")

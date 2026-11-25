@@ -39,6 +39,8 @@ type Report struct {
 	// its final rename (for example when it reached its time limit on a stalled disk).
 	Recovered int `json:"recovered"`
 	Remaining int `json:"remaining"`
+	// QuarantineExpired counts quarantined files deleted because they were older than QuarantineKeep.
+	QuarantineExpired int `json:"quarantine_expired"`
 }
 
 // orphanAfter is how old a spool temp file must be before its writer is certainly gone: several
@@ -135,7 +137,33 @@ func Drain(ctx context.Context, d Deps) (Report, error) {
 	if err != nil {
 		return rep, err
 	}
+	rep.QuarantineExpired = d.expireQuarantine()
 	return rep, d.RewriteRootsCache(ctx)
+}
+
+// QuarantineKeep is how long a quarantined spool file is kept for looking into why it could not
+// be stored. It holds captured text, so it is not kept for ever (L5); its gap stays recorded.
+const QuarantineKeep = 30 * 24 * time.Hour
+
+// expireQuarantine deletes quarantined files captured more than QuarantineKeep ago. A rename keeps
+// a file's modification time, so the age counts from the capture.
+func (d Deps) expireQuarantine() int {
+	dir := filepath.Join(d.Paths.DataDir, QuarantineDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil || e.IsDir() || d.Now().Sub(fi.ModTime()) < QuarantineKeep {
+			continue
+		}
+		if os.Remove(filepath.Join(dir, e.Name())) == nil {
+			n++
+		}
+	}
+	return n
 }
 
 func (d Deps) one(ctx context.Context, path, name string, rep *Report) error {

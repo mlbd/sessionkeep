@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,7 +107,25 @@ func open(ctx context.Context, path string, migrations fs.FS, dir string) (*Stor
 	if _, err := migrate(ctx, db, migrations, dir); err != nil {
 		return fail(err)
 	}
+	if err := restrictFiles(path); err != nil {
+		return fail(err)
+	}
 	return &Store{db: db, engine: engine}, nil
+}
+
+// restrictFiles makes the database and its WAL and shared-memory files readable by the user only
+// on Unix (L4). SQLite creates them with the process umask, usually 0644, and the folder around
+// them may be readable by others when it existed before SessionKeep. Windows uses the folder's ACL.
+func restrictFiles(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	for _, f := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(f, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("make %s private: %w", f, err)
+		}
+	}
+	return nil
 }
 
 // Engine returns the engine information read when the store was opened.
@@ -163,9 +183,18 @@ func loadMigrations(fsys fs.FS, dir string) ([]migration, error) {
 // migrate applies pending migrations, each in its own transaction together with its bookkeeping
 // row, so an interrupted migration leaves no partial schema. It returns how many were applied.
 func migrate(ctx context.Context, db *sql.DB, fsys fs.FS, dir string) (int, error) {
+	return migrateUpTo(ctx, db, fsys, dir, -1)
+}
+
+// migrateUpTo applies the migrations up to and including version upto (all of them when upto is
+// negative). Verifying an export builds the schema of its version this way.
+func migrateUpTo(ctx context.Context, db *sql.DB, fsys fs.FS, dir string, upto int) (int, error) {
 	known, err := loadMigrations(fsys, dir)
 	if err != nil {
 		return 0, err
+	}
+	if upto >= 0 && upto < len(known) {
+		known = known[:upto]
 	}
 	if _, err := db.ExecContext(ctx, `create table if not exists schema_migrations(
   version integer primary key, name text not null, checksum text not null, applied_at text not null) strict`); err != nil {

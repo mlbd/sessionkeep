@@ -291,6 +291,22 @@ func TestBadSpoolFilesAreQuarantinedWithoutBlockingTheRest(t *testing.T) {
 	if _, err := Drain(ctx, d); err != nil || r.spoolFiles() != 0 {
 		t.Fatalf("stale temp file not removed: err=%v entries=%d", err, r.spoolFiles())
 	}
+
+	// Quarantined files hold captured text, so they are not kept for ever (L5): once captured
+	// more than QuarantineKeep ago they are deleted; their gaps stay recorded.
+	gaps := r.q(`select count(*) from capture_gaps where source = 'spool'`)
+	month := time.Now().Add(-QuarantineKeep - 24*time.Hour)
+	for _, n := range []string{"00000000000000000001-garbage.evt", "00000000000000000003-orphan.evt"} {
+		os.Chtimes(filepath.Join(r.paths.DataDir, QuarantineDir, n), month, month)
+	}
+	rep, err := Drain(ctx, d)
+	q, _ = os.ReadDir(filepath.Join(r.paths.DataDir, QuarantineDir))
+	if err != nil || rep.QuarantineExpired != 2 || len(q) != 2 {
+		t.Fatalf("expired quarantine files: err=%v expired=%d left=%d, want 2 and 2", err, rep.QuarantineExpired, len(q))
+	}
+	if n := r.q(`select count(*) from capture_gaps where source = 'spool'`); n != gaps {
+		t.Fatalf("gap rows after expiry = %s, want %s as before", n, gaps)
+	}
 }
 
 func TestGapLogIsImportedOnce(t *testing.T) {
