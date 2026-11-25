@@ -262,6 +262,67 @@ func TestSecretsNeverReachDisk(t *testing.T) {
 	}
 }
 
+// Tool output is redacted as text, not as escaped JSON, and is cut only after redaction; the
+// output of reading a secrets file is not kept at all (security review M1).
+func TestToolOutputIsRedactedAsTextAndSecretFilesAreWithheld(t *testing.T) {
+	const pass = "Synth3tic-db-pw"
+	r := newRig(t, "ask", "", nil, appRoot)
+
+	// A quoted value, as a Read of a config file returns it inside JSON.
+	ev := r.event(r.handle("PostToolUse", payload(t, map[string]any{
+		"tool_name": "Read", "tool_input": map[string]any{"file_path": `C:\Work\App\config\app.ini`},
+		"tool_response": map[string]any{"type": "text", "file": map[string]any{"content": "[db]\nDB_PASSWORD=\"" + pass + "\"\nhost = \"db.example.test\""}},
+	})))
+	got, _ := ev.Payload["tool_response"].(string)
+	if strings.Contains(got, pass) || !strings.Contains(got, "db.example.test") || !strings.Contains(got, "DB_PASSWORD=") {
+		t.Errorf("tool output = %q", got)
+	}
+
+	// A token that straddles the snippet limit is redacted, not cut into an unrecognisable stub.
+	gh := "ghp_0123456789abcdefghijABCDEFGHIJ012345"
+	long := strings.Repeat("x", maxSnippetBytes-10) + " " + gh + " tail"
+	ev = r.event(r.handle("PostToolUse", payload(t, map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "make"}, "tool_response": map[string]any{"stdout": long}})))
+	if got, _ := ev.Payload["tool_response"].(string); strings.Contains(got, "ghp_01234") || len(got) > maxSnippetBytes || ev.Completeness != "truncated" {
+		t.Errorf("a token at the cut survived or the limit was exceeded: %d bytes, %q", len(got), got[len(got)-20:])
+	}
+
+	// Reading a secrets file, by tool or by shell command, keeps the path but no output.
+	for _, in := range []map[string]any{
+		{"tool_name": "Read", "tool_input": map[string]any{"file_path": `C:\Work\App\.env.production`}},
+		{"tool_name": "Read", "tool_input": map[string]any{"file_path": `C:\Work\App\keys\deploy.pem`}},
+		{"tool_name": "Bash", "tool_input": map[string]any{"command": "cat .env | grep DB"}},
+		{"tool_name": "Bash", "tool_input": map[string]any{"command": "type C:\\Work\\App\\gcp-service-account.json"}},
+	} {
+		in["tool_response"] = map[string]any{"stdout": "WITHHELD-CONTENT plain words"}
+		ev := r.event(r.handle("PostToolUse", payload(t, in)))
+		if _, ok := ev.Payload["tool_response"]; ok || ev.Payload["tool_response_withheld"] == nil {
+			t.Errorf("output of %v was kept: %v", in["tool_input"], ev.Payload)
+		}
+	}
+	if strings.Contains(r.allFiles(), "WITHHELD-CONTENT") {
+		t.Error("the content of a secrets file reached disk")
+	}
+	// An example file is ordinary.
+	ev = r.event(r.handle("PostToolUse", payload(t, map[string]any{"tool_name": "Read", "tool_input": map[string]any{"file_path": `C:\Work\App\.env.example`}, "tool_response": "KEEP=me"})))
+	if ev.Payload["tool_response"] != "KEEP=me" {
+		t.Errorf(".env.example output = %v", ev.Payload)
+	}
+}
+
+func TestSensitiveFileNames(t *testing.T) {
+	for p, want := range map[string]bool{
+		".env": true, "/srv/app/.env.local": true, `C:\app\prod.env`: true, ".envrc": true, "id_ed25519": true, "server.key": true,
+		"cert.p12": true, "credentials": true, "credentials.json": true, "my-service-account.json": true, "prod.tfvars": true,
+		"terraform.tfstate": true, ".npmrc": true, ".git-credentials": true,
+		".env.example": false, ".env.sample": false, "id_ed25519.pub": false, "README.md": false, "keyboard.go": false,
+		"environment.ts": false, "service-account.md": false, "monkey.txt": false,
+	} {
+		if SensitiveFile(p) != want {
+			t.Errorf("SensitiveFile(%q) = %v", p, !want)
+		}
+	}
+}
+
 func TestFieldsNotOnTheAllowlistAreNeverPersisted(t *testing.T) {
 	r := newRig(t, "ask", "", nil, appRoot)
 	r.handle("PostToolUse", payload(t, map[string]any{

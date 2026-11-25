@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -302,23 +303,30 @@ func build(ev *Event, in hookInput) {
 			p[k] = v
 		}
 	}
+	// cut shortens v to at most limit bytes on a character boundary and records what was dropped.
+	cut := func(v string, limit int) string {
+		if len(v) <= limit {
+			return v
+		}
+		at := limit
+		for at > 0 && !utf8.RuneStart(v[at]) {
+			at--
+		}
+		ev.DroppedBytes += len(v) - at
+		ev.Completeness = "truncated"
+		return v[:at]
+	}
+	// Text is redacted before it is cut to the limit: cutting first could leave the start of a
+	// secret too short for any rule to recognise. Only a bounded margin beyond the limit is
+	// redacted, so a huge output costs no more than a long one.
 	text := func(k, v string, limit int) {
 		if v == "" {
 			return
 		}
-		if len(v) > limit {
-			cut := limit
-			for cut > 0 && !utf8.RuneStart(v[cut]) {
-				cut--
-			}
-			ev.DroppedBytes += len(v) - cut
-			ev.Completeness = "truncated"
-			v = v[:cut]
-		}
-		out, n := redact.Text(v)
+		out, n := redact.Text(cut(v, limit+redactMargin))
 		ev.Redaction.Count += n
 		ev.Redaction.Applied = ev.Redaction.Applied || n > 0
-		p[k] = out
+		p[k] = cut(out, limit)
 	}
 	withText := ev.Level == config.LevelConversation || ev.Level == config.LevelExtended
 
@@ -358,6 +366,16 @@ func build(ev *Event, in hookInput) {
 	if ev.HookEvent == "PostToolUseFailure" {
 		text("error", in.Error, maxSnippetBytes)
 	}
+	// The output of a tool that read a file which commonly holds secrets is not kept at all.
+	withheld := false
+	for _, k := range []string{"file_path", "path", "notebook_path"} {
+		if s, ok := in.ToolInput[k].(string); ok && SensitiveFile(s) {
+			withheld = true
+		}
+	}
+	if c, ok := in.ToolInput["command"].(string); ok && mentionsSensitiveFile(c) {
+		withheld = true
+	}
 	if len(in.ToolInput) > 0 {
 		kept := map[string]any{}
 		for _, k := range toolInputKeys {
@@ -373,8 +391,96 @@ func build(ev *Event, in hookInput) {
 		}
 	}
 	if ev.Level == config.LevelExtended && len(in.ToolResponse) > 0 && string(in.ToolResponse) != "null" {
-		text("tool_response", string(in.ToolResponse), maxSnippetBytes)
+		if withheld {
+			p["tool_response_withheld"] = "the tool read a file that commonly holds secrets"
+		} else {
+			text("tool_response", readable(in.ToolResponse), maxSnippetBytes)
+		}
 	}
+}
+
+// redactMargin is how far beyond a field's limit text is redacted before it is cut.
+const redactMargin = 4 << 10
+
+// readable turns a tool response into plain text: its strings, one after another. Redaction must
+// see the text itself; in the JSON form a quoted value arrives as \"...\", which the rules for
+// quoted values do not recognise. Numbers and true/false are left out.
+func readable(raw json.RawMessage) string {
+	var v any
+	if json.Unmarshal(raw, &v) != nil {
+		return string(raw)
+	}
+	var b strings.Builder
+	var walk func(any)
+	walk = func(x any) {
+		switch t := x.(type) {
+		case string:
+			if t != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(t)
+			}
+		case []any:
+			for _, e := range t {
+				walk(e)
+			}
+		case map[string]any:
+			keys := make([]string, 0, len(t))
+			for k := range t {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				walk(t[k])
+			}
+		}
+	}
+	walk(v)
+	return b.String()
+}
+
+// SensitiveFile reports whether a path names a file that commonly holds secrets: .env files
+// (except examples), private keys and certificates with keys, SSH keys, credential and token
+// files, service-account JSON, Terraform variables and state. SessionKeep keeps no tool output
+// from reading one, at any level.
+func SensitiveFile(p string) bool {
+	base := strings.ToLower(p)
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	if base == ".env" || strings.HasPrefix(base, ".env.") || strings.HasSuffix(base, ".env") {
+		for _, safe := range []string{"example", "sample", "template", "dist", "defaults"} {
+			if strings.HasSuffix(base, "."+safe) {
+				return false
+			}
+		}
+		return true
+	}
+	switch base {
+	case ".envrc", ".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass", ".git-credentials", ".dockercfg", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+		"secrets.json", "secrets.yml", "secrets.yaml", "terraform.tfstate", "terraform.tfstate.backup":
+		return true
+	}
+	for _, ext := range []string{".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".tfvars", ".tfstate", ".ppk"} {
+		if strings.HasSuffix(base, ext) {
+			return true
+		}
+	}
+	if strings.HasPrefix(base, "credentials") || (strings.HasSuffix(base, ".json") && (strings.Contains(base, "service-account") || strings.Contains(base, "serviceaccount") || strings.Contains(base, "service_account"))) {
+		return true
+	}
+	return false
+}
+
+// mentionsSensitiveFile reports whether a shell command names such a file, as in `cat .env`.
+func mentionsSensitiveFile(cmd string) bool {
+	for _, w := range strings.FieldsFunc(cmd, func(r rune) bool { return strings.ContainsRune(" \t\r\n\"'`;|&<>(),=", r) }) {
+		if SensitiveFile(w) {
+			return true
+		}
+	}
+	return false
 }
 
 // writeDurable writes name into dir so it is either fully present or absent: temp file, flush to

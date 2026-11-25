@@ -36,6 +36,26 @@ func TestSecretsAreRemoved(t *testing.T) {
 		{"curl user flag", "curl -u admin:" + fakePass + " https://api.example.test/v1", []string{fakePass}, []string{"curl -u", "https://api.example.test/v1"}},
 		{"long credential flags", "mysql --user=root --password " + fakePass + " && tool --api-key=k-9f8e7d6c5b4a --token abcd1234efgh", []string{fakePass, "k-9f8e7d6c5b4a", "abcd1234efgh"}, []string{"mysql", "--password", "--api-key", "&& tool"}},
 		{"private marker", "public <private>my home address is 1 Synthetic Way</private> public", []string{"Synthetic Way"}, []string{"public"}},
+		// Rule set 2 (security review M1). All values are made up.
+		{"npm token", "use npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 here", []string{"npm_AbCdEfGh"}, []string{"use", "here"}},
+		{"webhook secret", "whsec_c3ludGhldGljc3ludGhldGljc3ludGg=", []string{"c3ludGhldGljc3lu"}, nil},
+		{"hugging face, gitlab, google, sendgrid", "hf_AbCdEfGhIjKlMnOpQrStUvWxYz01234 glpat-AbCdEfGhIjKlMnOpQrSt GOCSPX-AbCdEfGhIjKlMnOpQrStUv SG.AbCdEfGhIjKlMnOp.QrStUvWxYz0123456789ab",
+			[]string{"hf_AbCd", "glpat-AbCd", "GOCSPX-AbCd", "SG.AbCd"}, nil},
+		{"slack and discord webhooks", "post to https://hooks.slack.com/services/T0000/B0000/XXXXsyntheticXXXX and https://discord.com/api/webhooks/123456789/AbCdEfGhIjKlMnOpQrStUvWx",
+			[]string{"T0000/B0000", "XXXXsynthetic", "AbCdEfGhIjKlMnOpQrStUvWx"}, []string{"https://hooks.slack.com/services/", "https://discord.com/api/webhooks/"}},
+		{"azure connection string and SAS", "DefaultEndpointsProtocol=https;AccountName=demo;AccountKey=c3ludGhldGljc3ludGhldGljc3ludGhldGlj==;EndpointSuffix=core.windows.net and https://demo.blob.core.windows.net/c?sv=2024&sig=AbCdEf%2BGhIjKlMnOpQr%3D",
+			[]string{"c3ludGhldGljc3ludGhl", "AbCdEf%2BGh"}, []string{"AccountName=demo", "sv=2024"}},
+		{"PGP private key block", "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBGsyntheticPGPbody\n-----END PGP PRIVATE KEY BLOCK-----", []string{"lQOYBGsyntheticPGPbody"}, nil},
+		{"cookie header", "curl -H 'Cookie: session=AbCdEf0123456789; theme=dark' https://example.test", []string{"AbCdEf0123456789"}, []string{"curl -H", "https://example.test"}},
+		{"mysql and docker passwords", "mysql -u root -p" + fakePass + " app && docker login -u me -p dckr_synthetic_pw registry.example.test",
+			[]string{fakePass, "dckr_synthetic_pw"}, []string{"mysql -u root -p", "registry.example.test"}},
+		{"curl user, attached and quoted", "curl -uadmin:" + fakePass + " x; curl -u 'bob:" + fakePass + "2' y", []string{fakePass}, []string{"curl", " x;", " y"}},
+		{"URL with an empty user or @ in the password", "redis://:" + fakePass + "@cache.example.test:6379 and https://user:p@ss-synth-1@host.example.test/x",
+			[]string{fakePass, "p@ss-synth-1", "ss-synth-1"}, []string{"cache.example.test:6379", "host.example.test/x"}},
+		{"card number", "card 4111 1111 1111 1111 exp 12/30 and 5555555555554444", []string{"4111 1111", "5555555555554444"}, []string{"card", "exp 12/30"}},
+		{".env names", "SMTP_PASS=s3cr3t-mail\nAPP_SALT='pepper-and-salt'\nBASIC_AUTH=user:hunter22\nSENTRY_DSN=https://abc123@o1.ingest.example.test/1",
+			[]string{"s3cr3t-mail", "pepper-and-salt", "user:hunter22", "abc123@"}, []string{"SMTP_PASS", "APP_SALT", "BASIC_AUTH", "SENTRY_DSN"}},
+		{"short password", `password: "hx7q"`, []string{"hx7q"}, []string{"password"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,6 +96,16 @@ func TestOrdinaryTextIsLeftAlone(t *testing.T) {
 		"SGVsbG8sIHRoaXMgaXMganVzdCBvcmRpbmFyeSB0ZXh0Lg==", // base64 of plain prose
 		"grep -u pattern file.txt && ls -u",
 		"pass --password-file ./pw.txt and --token-url https://example.test/t then --user alice",
+		// Near misses for rule set 2.
+		"mysql -u root -P 3306 -h db.example.test",
+		"docker login registry.example.test",
+		"Cookie: none set yet",
+		"the npm_config_cache folder and hf_hub download",
+		"passenger_count = 4; bypass = true; compass: north",
+		"order 4111 shipped; timestamp 1795599784232497600; id 4111111111111112",
+		"NEXT_PUBLIC_AUTH=true and DISABLE_AUTH=1",
+		"token: abc",
+		"see https://user@example.test/repo.git",
 	} {
 		if out, n := Text(in); out != in || n != 0 {
 			t.Errorf("changed ordinary text:\n in: %q\nout: %q (count %d)", in, out, n)
